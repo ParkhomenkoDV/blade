@@ -18,7 +18,7 @@ setup(
     author='Daniil Andryushin',
     author_email='',
     url='https://github.com/ParkhomenkoDV/blade.git',
-    packages=[name],
+    packages=find_packages(),
     python_requires='>=3.8',
     install_requires=install_requires,
 )
