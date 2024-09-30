@@ -117,27 +117,27 @@ class Blade:
         f *= k ** 2 / (2 * pi * self.h ** 2)
         return float(f), '1/s'
 
-    def campbell_diagram(self, max_rotation_frequency: int, k=arange(1, 11, 1), **kwargs):
+    def campbell_diagram(self, max_rotation_frequency: int, multiplicity=arange(1, 11, 1), **kwargs):
         """Диаграмма Кэмпбелла [6]"""
 
         rotation_frequency = arange(0, max_rotation_frequency + 1, 1) * (2 * pi)  # перевод из рад/c в 1/c=об/c=Гц
         # динамическая частота колебаний вращающегося диска
         # self.R[0] = радиус корня
-        f = sqrt(self.natural_frequencies(max(k))[0] ** 2 + (1 + self.R[0] / self.h) * rotation_frequency ** 2)
+        f = sqrt(self.natural_frequencies(max(multiplicity))[0] ** 2 + (1 + self.R[0] / self.h) * rotation_frequency ** 2)
         resonance = set()  # резонансные частоты [1/с]
 
         plt.figure(figsize=kwargs.pop('figsize', (8, 8)))
         plt.title('Campbell diagram', fontsize=14, fontweight='bold')
-        for k_ in k:
-            plt.plot([0, rotation_frequency[-1]], [0, rotation_frequency[-1] * k_],
+        for k in multiplicity:
+            plt.plot([0, rotation_frequency[-1]], [0, rotation_frequency[-1] * k],
                      color='orange', linestyle='solid', linewidth=1)
-            plt.text(rotation_frequency[-1], rotation_frequency[-1] * k_, f'k{k_}',
+            plt.text(rotation_frequency[-1], rotation_frequency[-1] * k, f'k{k}',
                      fontsize=12, ha='left', va='center')
-            if k_ ** 2 - (1 + self.R[0] / self.h) >= 0:
-                x0 = f[0] / sqrt(k_ ** 2 - (1 + self.R[0] / self.h))  # f
+            if k ** 2 - (1 + self.R[0] / self.h) >= 0:
+                x0 = f[0] / sqrt(k ** 2 - (1 + self.R[0] / self.h))  # f
                 if not isnan(x0) and x0 <= rotation_frequency[-1]:
                     resonance.add(round(x0, 6))
-                    plt.scatter(x0, k_ * x0, color='red')
+                    plt.scatter(x0, k * x0, color='red')
         plt.plot(rotation_frequency, f, color='black', linestyle='solid', linewidth=2, label='f')
         plt.xlabel('Frequency [1/s]', fontsize=12)
         plt.ylabel('Frequency [1/s]', fontsize=12)
