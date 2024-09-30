@@ -28,9 +28,7 @@ class Blade:
 
     @classmethod
     def help(cls):
-        version = '1.3'
-        print('2D построение')
-        print('3D построение')
+        version = '3.0'
         print('Расчет на прочность')
         return version
 
@@ -62,7 +60,6 @@ class Blade:
 
     def show(self, D: int, **kwargs):
         """Визуализация"""
-
         assert isinstance(D, int) and D in (2, 3)  # мерность пространства
 
         if 2 == D:
@@ -70,30 +67,24 @@ class Blade:
             plt.axis('equal')
             plt.grid(True)
             for i, (r, section) in enumerate(self.__sections.items()):
-                plt.plot(*array(section).T,
+                plt.plot(*array(section, dtype='float16').T,
                          color='black', ls='solid', linewidth=(1 + 2 / (len(self.__sections) - 1) * i))
 
         elif 3 == D:
             from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-            plt.figure(figsize=kwargs.pop('figsize', (9, 9)))
+            plt.figure(figsize=kwargs.pop('figsize', (8, 8)))
             ax = plt.axes(projection='3d')
             ax.axis('equal')
-            *_, zs = self.__sections.values().T
-            for i in np.unique(zs):
-                xx, yy, zz = [], [], []
-                for x, y, z in self.__sections:
-                    if i == z:
-                        xx.append(x)
-                        yy.append(y)
-                        zz.append(z)
-                vertices = [list(zip(xx, yy, zz))]
-                poly = Poly3DCollection(vertices, alpha=0.8)
+            for z, section in self.__sections.items():
+                x, y = array(section, dtype='float16').T
+                vertices = [list(zip(x, y, [z] * len(x)))]
+                poly = Poly3DCollection(vertices, color='black', alpha=0.8)
                 ax.add_collection3d(poly)
             ax.set_title(kwargs.pop('title', 'Blade'), fontsize=14, fontweight='bold')
-            ax.set_xlabel('x')
-            ax.set_ylabel('y')
-            ax.set_zlabel('z')
+            ax.set_xlabel('x', fontsize=12)
+            ax.set_ylabel('y', fontsize=12)
+            ax.set_zlabel('z', fontsize=12)
 
         plt.show()
 
@@ -104,8 +95,9 @@ class Blade:
         return
 
     def __show_tensions(self):
+        """Визуализация расчет на прочность"""
 
-        fg = plt.figure()
+        plt.figure(figsize=(12, 8))
         plt.show()
 
     def natural_frequencies(self, max_k: int) -> tuple[float, str]:
@@ -170,10 +162,10 @@ def test():
                            inlet_angle=radians(20), outlet_angle=radians(15), x_ray_cross=0.35, upper_proximity=0.5)
         airfoil1 = Airfoil('BMSTU', 40, 1, radians(30),
                            rotation_angle=radians(50), relative_inlet_radius=0.04, relative_outlet_radius=0.025,
-                           inlet_angle=radians(15), outlet_angle=radians(12.5), x_ray_cross=0.35, upper_proximity=0.5)
+                           inlet_angle=radians(15), outlet_angle=radians(10), x_ray_cross=0.35, upper_proximity=0.5)
         airfoil2 = Airfoil('BMSTU', 40, 1, radians(40),
                            rotation_angle=radians(40), relative_inlet_radius=0.03, relative_outlet_radius=0.02,
-                           inlet_angle=radians(10), outlet_angle=radians(10), x_ray_cross=0.35, upper_proximity=1)
+                           inlet_angle=radians(10), outlet_angle=radians(5), x_ray_cross=0.35, upper_proximity=1)
 
         sections = {0.5: airfoil0.transform(airfoil0.coordinates,
                                             x0=airfoil0.properties['x0'], y0=airfoil0.properties['y0']),
@@ -189,7 +181,7 @@ def test():
         blade.show(2)
         blade.show(3)
 
-        tensions = blade.tensions()
+        tensions = blade.tensions(show=True)
 
 
 if __name__ == '__main__':
