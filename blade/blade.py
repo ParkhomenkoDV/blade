@@ -1,6 +1,6 @@
 from types import MappingProxyType  # неизменяемый словарь
 import numpy as np
-from numpy import nan, isnan, pi, sqrt, array, linspace, arange
+from numpy import nan, isnan, pi, sqrt, array, linspace, arange, radians
 from scipy import interpolate, integrate
 import matplotlib.pyplot as plt
 
@@ -27,8 +27,7 @@ class Blade:
     """Лопатка/винт/лопасть"""
 
     @classmethod
-    @property
-    def __version__(cls):
+    def help(cls):
         version = '1.3'
         print('2D построение')
         print('3D построение')
@@ -41,7 +40,7 @@ class Blade:
 
         assert isinstance(sections, dict)
         assert all(isinstance(key, (int, float, np.number)) for key in sections.keys())
-        assert len(sections) >= 2  # min количество сечений
+        assert len(sections) >= 1  # min количество сечений
         assert all(isinstance(value, (list, tuple, np.ndarray)) for value in sections.values())
         assert all(isinstance(coord, (list, tuple, np.ndarray)) for value in sections.values() for coord in value)
         assert all(len(coord) == 2 for value in sections.values() for coord in value)  # x, y
@@ -51,19 +50,29 @@ class Blade:
         self.__material = material
         self.__sections = dict(sorted(sections.items(), key=lambda item: item[0]))  # сортировка по высоте
 
-        self.height = max(self.__sections.keys()) - min(self.__sections.keys())
+        self.__height = max(self.__sections.keys()) - min(self.__sections.keys())
 
     @property
     def material(self):
         return self.__material
 
+    @property
+    def height(self) -> float:
+        return self.__height
+
     def show(self, D: int, **kwargs):
-        """"""
+        """Визуализация"""
 
         assert isinstance(D, int) and D in (2, 3)  # мерность пространства
 
         if 2 == D:
-            pass
+            plt.figure(figsize=kwargs.pop('figsize', (8, 8)))
+            plt.axis('equal')
+            plt.grid(True)
+            for i, (r, section) in enumerate(self.__sections.items()):
+                plt.plot(*array(section).T,
+                         color='black', ls='solid', linewidth=(1 + 2 / (len(self.__sections) - 1) * i))
+
         elif 3 == D:
             from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
@@ -85,12 +94,21 @@ class Blade:
             ax.set_xlabel('x')
             ax.set_ylabel('y')
             ax.set_zlabel('z')
+
         plt.show()
 
-    def solve(self, omega, *args, **kwargs):
-        pass
+    def tensions(self, show=True):
+        """Расчет на прочность"""
 
-    def natural_frequencies(self, max_k: int):
+        if show: self.__show_tensions()
+        return
+
+    def __show_tensions(self):
+
+        fg = plt.figure()
+        plt.show()
+
+    def natural_frequencies(self, max_k: int) -> tuple[float, str]:
         """Частота собственных колебаний [6]"""
         self.I = self.b * self.c ** 3 / 12  # момент инерции сечения
         self.F = self.b * self.c  # площадь сечения
@@ -98,14 +116,14 @@ class Blade:
         if "крепление в заделке":
             k = array([1.875, 4.694] + [pi * (i - 0.5) for i in range(3, max_k + 1, 1)])
         elif "крепление шарнирное":
-            k = array([0] + [pi(i - 0.75) for i in range(2, max_k + 1, 1)])
+            k = array([0] + [pi * (i - 0.75) for i in range(2, max_k + 1, 1)])
         else:
             raise
 
         f = self.material.E(0) * self.I / (self.material.density(0) * np.mean(self.F))
         f = sqrt(f)
         f *= k ** 2 / (2 * pi * self.h ** 2)
-        return f, '1/s'
+        return float(f), '1/s'
 
     def campbell_diagram(self, max_rotation_frequency: int, k=arange(1, 11, 1), **kwargs):
         """Диаграмма Кэмпбелла [6]"""
@@ -135,54 +153,43 @@ class Blade:
         plt.legend(fontsize=12)
         plt.show()
 
-        return sorted(list(resonance), reverse=False), '1/s'
+        return sorted(list(map(float, resonance)), reverse=False), '1/s'
 
 
 def test():
     """Тестирование библиотеки"""
-    print(Blade.__version__)
+    print(Blade.help())
 
     blades = list()
 
     if 1:
         material = Material('ЖС-40', {'density': 8600})
 
-        sections = {
-            0.2: (
-                (0.00, +0.000),
-                (0.20, +0.005),
-                (0.50, +0.010),
-                (1.00, +0.000),
-                (0.50, -0.010),
-                (0.00, +0.000),),
-            0.3: (
-                (0.00, +0.000),
-                (0.20, +0.005),
-                (0.50, +0.010),
-                (1.00, +0.000),
-                (0.50, -0.010),
-                (0.00, +0.000),),
-            0.6: (
-                (0.00, +0.000),
-                (0.20, +0.005),
-                (0.50, +0.010),
-                (1.00, +0.000),
-                (0.50, -0.010),
-                (0.00, +0.000),), }
+        airfoil0 = Airfoil('BMSTU', 40, 1, radians(20),
+                           rotation_angle=radians(60), relative_inlet_radius=0.06, relative_outlet_radius=0.03,
+                           inlet_angle=radians(20), outlet_angle=radians(15), x_ray_cross=0.35, upper_proximity=0.5)
+        airfoil1 = Airfoil('BMSTU', 40, 1, radians(30),
+                           rotation_angle=radians(50), relative_inlet_radius=0.04, relative_outlet_radius=0.025,
+                           inlet_angle=radians(15), outlet_angle=radians(12.5), x_ray_cross=0.35, upper_proximity=0.5)
+        airfoil2 = Airfoil('BMSTU', 40, 1, radians(40),
+                           rotation_angle=radians(40), relative_inlet_radius=0.03, relative_outlet_radius=0.02,
+                           inlet_angle=radians(10), outlet_angle=radians(10), x_ray_cross=0.35, upper_proximity=1)
+
+        sections = {0.5: airfoil0.transform(airfoil0.coordinates,
+                                            x0=airfoil0.properties['x0'], y0=airfoil0.properties['y0']),
+                    0.6: airfoil1.transform(airfoil1.coordinates,
+                                            x0=airfoil1.properties['x0'], y0=airfoil1.properties['y0']),
+                    0.7: airfoil2.transform(airfoil2.coordinates,
+                                            x0=airfoil2.properties['x0'], y0=airfoil2.properties['y0'])}
 
         blade = Blade(material=material, sections=sections)
         blades.append(blade)
 
-    if 1:
-        material = Material('ИЭ-696', {'density': 8800})
-
-        sections = {
-            0.7: Airfoil('MYNK', ).coords,
-            0.88: Airfoil('MYNK', ).coords,
-            0.9: Airfoil('MYNK', ).coords, }
-
     for blade in blades:
+        blade.show(2)
         blade.show(3)
+
+        tensions = blade.tensions()
 
 
 if __name__ == '__main__':

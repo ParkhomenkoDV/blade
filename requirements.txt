@@ -5,7 +5,6 @@ scipy
 matplotlib
 
 decorators @ git+https://github.com/ParkhomenkoDV/decorators.git@master
-tools @ git+https://github.com/ParkhomenkoDV/tools.git@master
 mathematics @ git+https://github.com/ParkhomenkoDV/mathematics.git@master
-airfoil @ git+https://github.com/ParkhomenkoDV/airfoil.git@master
 material @ git+https://github.com/ParkhomenkoDV/material.git@master
+airfoil @ git+https://github.com/ParkhomenkoDV/airfoil.git@master
