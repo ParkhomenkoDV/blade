@@ -168,13 +168,14 @@ class Blade:
               sum([b['radius'] * b['volume'] for b in self.bondages])))
 
     def show_equal_strength(self, rotation_frequency: float | int | np.number,
-                            temperature: float | int | np.number, dis: int = 1_000, **kwargs) -> None:
+                            temperature: float | int | np.number, discreteness: int = 1_000, **kwargs) -> None:
         """Визуализация равнопрочности"""
         assert isinstance(rotation_frequency, (int, float, np.number))
         assert isinstance(temperature, (int, float, np.number)) and 0 < temperature
+        assert isinstance(discreteness, (int, np.integer)) and 10 <= discreteness
 
         radius0, *_, radius1 = tuple(self.__sections.keys())  # радиус втулки и периферии
-        radius = linspace(radius0, radius1, dis, endpoint=True)
+        radius = linspace(radius0, radius1, discreteness, endpoint=True)
 
         fg = plt.figure(figsize=kwargs.pop('figsize', (12, 6)))
         gs = fg.add_gridspec(nrows=1, ncols=3)
@@ -195,15 +196,62 @@ class Blade:
         plt.xlabel('radial force'), plt.ylabel('radius')
 
         fg.add_subplot(gs[0, 2])
-
+        # TODO
         plt.grid(True)
         plt.xlabel('radial tension'), plt.ylabel('radius')
 
         plt.show()
 
-    def tensions(self, rotation_frequency: float | int | np.number, pressure, density, show=True):
+    def tensions(self, rotation_frequency: float | int | np.number,
+                 density_inlet: dict, density_outlet: dict,
+                 pressure_inlet: dict, pressure_outlet: dict,
+                 velocity_axial_inlet: dict, velocity_axial_outlet: dict,
+                 velocity_tangential_inlet: dict, velocity_tangential_outlet: dict,
+                 show=True):
         """Расчет на прочность"""
         assert isinstance(rotation_frequency, (float, int, np.number))
+
+        assert isinstance(density_inlet, dict) and isinstance(density_outlet, dict)
+        assert all(isinstance(radius, (float, int, np.number)) and isinstance(density, (float, int, np.number))
+                   for radius, density in density_inlet.items())
+        assert all(isinstance(radius, (float, int, np.number)) and isinstance(density, (float, int, np.number))
+                   for radius, density in density_outlet.items())
+        assert all(0 <= radius and 0 < density for radius, density in density_inlet.items())
+        assert all(0 <= radius and 0 < density for radius, density in density_outlet.items())
+        density_inlet = dict(sorted(density_inlet.items(), key=lambda item: item[0], reverse=False))
+        density_outlet = dict(sorted(density_outlet.items(), key=lambda item: item[0], reverse=False))
+
+        assert isinstance(pressure_inlet, dict) and isinstance(pressure_outlet, dict)
+        assert all(isinstance(radius, (float, int, np.number)) and isinstance(pressure, (float, int, np.number))
+                   for radius, pressure in pressure_inlet.items())
+        assert all(isinstance(radius, (float, int, np.number)) and isinstance(pressure, (float, int, np.number))
+                   for radius, pressure in pressure_outlet.items())
+        assert all(0 <= radius and 0 < pressure for radius, pressure in pressure_inlet.items())
+        assert all(0 <= radius and 0 < pressure for radius, pressure in pressure_outlet.items())
+        pressure_inlet = dict(sorted(pressure_inlet.items(), key=lambda item: item[0], reverse=False))
+        pressure_outlet = dict(sorted(pressure_outlet.items(), key=lambda item: item[0], reverse=False))
+
+        assert isinstance(velocity_axial_inlet, dict) and isinstance(velocity_axial_outlet, dict)
+        assert all(isinstance(radius, (float, int, np.number)) and isinstance(velocity, (float, int, np.number))
+                   for radius, velocity in velocity_axial_inlet.items())
+        assert all(isinstance(radius, (float, int, np.number)) and isinstance(velocity, (float, int, np.number))
+                   for radius, velocity in velocity_axial_outlet.items())
+        assert all(0 <= radius for radius, velocity in velocity_axial_inlet.items())
+        assert all(0 <= radius for radius, velocity in velocity_axial_outlet.items())
+        velocity_axial_inlet = dict(sorted(velocity_axial_inlet.items(), key=lambda item: item[0], reverse=False))
+        velocity_axial_outlet = dict(sorted(velocity_axial_outlet.items(), key=lambda item: item[0], reverse=False))
+
+        assert isinstance(velocity_tangential_inlet, dict) and isinstance(velocity_tangential_outlet, dict)
+        assert all(isinstance(radius, (float, int, np.number)) and isinstance(velocity, (float, int, np.number))
+                   for radius, velocity in velocity_tangential_inlet.items())
+        assert all(isinstance(radius, (float, int, np.number)) and isinstance(velocity, (float, int, np.number))
+                   for radius, velocity in velocity_tangential_outlet.items())
+        assert all(0 <= radius for radius, velocity in velocity_tangential_inlet.items())
+        assert all(0 <= radius for radius, velocity in velocity_tangential_outlet.items())
+        velocity_tangential_inlet = dict(sorted(velocity_tangential_inlet.items(),
+                                                key=lambda item: item[0], reverse=False))
+        velocity_tangential_outlet = dict(sorted(velocity_tangential_outlet.items(),
+                                                 key=lambda item: item[0], reverse=False))
 
         N = 0
 
