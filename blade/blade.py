@@ -165,10 +165,13 @@ class Blade:
                            sum([b['radius'] * b['volume'] for b in self.bondages])))
 
     def show_equal_strength(self, rotation_frequency: float | int | np.number,
-                            temperature: float | int | np.number) -> None:
+                            temperature: float | int | np.number, dis: int = 1_000) -> None:
         """Визуализация равнопрочности"""
         assert isinstance(rotation_frequency, (int, float, np.number))
         assert isinstance(temperature, (int, float, np.number)) and 0 < temperature
+
+        radius0, *_, radius1 = tuple(self.__sections.keys())[-1]  # радиус втулки и периферии
+        radius = linspace(radius0, radius1, dis, endpoint=True)
 
         plt.show()
 
