@@ -25,8 +25,8 @@ REFERENCES = MappingProxyType({
 
 class Blade:
     """Лопатка/винт/лопасть"""
-    __slots__ = ('__material', '__sections', '__bondages', '__height',
-                 '__area', '__f_area')
+    __slots__ = ('__material', '__sections', '__bondages',
+                 '__height', '__area', '__f_area')
 
     @classmethod
     def help(cls):
@@ -35,13 +35,13 @@ class Blade:
         return version
 
     def __init__(self, material: Material, sections: dict[float | int | np.number: list, tuple, np.ndarray],
-                 bondages=tuple()) -> None:
+                 bondages: tuple[dict] | list[dict] = tuple()) -> None:
         # проверка на тип данных material
         assert isinstance(material, Material)
 
         assert isinstance(sections, dict)
         assert all(isinstance(key, (int, float, np.number)) for key in sections.keys())
-        assert len(sections) >= 1  # min количество сечений
+        assert len(sections) >= 2  # min количество сечений для определения высоты
         assert all(isinstance(value, (list, tuple, np.ndarray)) for value in sections.values())
         assert all(isinstance(coord, (list, tuple, np.ndarray)) for value in sections.values() for coord in value)
         assert all(len(coord) == 2 for value in sections.values() for coord in value)  # x, y
@@ -90,10 +90,17 @@ class Blade:
     def height(self) -> float:
         return self.__height
 
+    @property
+    def radius_equal_strength(self) -> float:
+        """Радиус равнопрочности"""
+        ksi = self.__area[-1] / self.__area[0]
+        radius0, *_, radius1 = tuple(self.__sections.keys())  # радиус втулки и периферии
+        return sqrt((radius0 ** 2 - radius1 ** 2 * ln(ksi)) / (1 - ln(ksi)))
+
     @staticmethod
     def upper_lower(coordinates: tuple[tuple[float, float], ...]) -> dict[str:tuple[tuple[float, float], ...]]:
         """Разделение координат на спинку и корыто"""
-        X, Y = array(coordinates).T
+        X, Y = array(coordinates, dtype='float64').T
         argmin, argmax = np.argmin(X), np.argmax(X)
         upper, lower = list(), list()
         if argmin < argmax:
@@ -137,32 +144,33 @@ class Blade:
 
         plt.show()
 
-    def equal_strength(self, rotation_frequency: float | int | np.number, temperature: float | int | np.number):
-        """Равнопрочность"""
+    def area_equal_strength(self, rotation_frequency: float | int | np.number):
+        assert isinstance(rotation_frequency, (int, float, np.number))
+
+        radius1 = tuple(self.__sections.keys())[-1]  # радиус периферии
+
+        return lambda z: (self.__area[-1] * exp(2 / (radius1 ** 2 - self.radius_equal_strength ** 2) *
+                                                integrate.quad(z, z, self.radius_equal_strength))) \
+            if z <= self.radius_equal_strength else self.__area[-1]
+
+    def radial_force_equal_strength(self, rotation_frequency: float | int | np.number,
+                                    temperature: float | int | np.number):
         assert isinstance(rotation_frequency, (int, float, np.number))
         assert isinstance(temperature, (int, float, np.number)) and 0 < temperature
 
-        ksi = self.__area[-1] / self.__area[0]
+        radius1 = tuple(self.__sections.keys())[-1]  # радиус периферии
 
-        radius0, *_, radius1 = list(self.__sections.keys())  # радиус втулки и периферии
+        return lambda z: (self.material.density(temperature) * rotation_frequency ** 2 *
+                          (integrate.quad(self.area_equal_strength(z) * z, z, radius1) +
+                           sum([b['radius'] * b['volume'] for b in self.bondages])))
 
-        radius_equal_strength = sqrt((radius0 ** 2 - radius1 ** 2 * ln(ksi)) / (1 - ln(ksi)))
+    def show_equal_strength(self, rotation_frequency: float | int | np.number,
+                            temperature: float | int | np.number) -> None:
+        """Визуализация равнопрочности"""
+        assert isinstance(rotation_frequency, (int, float, np.number))
+        assert isinstance(temperature, (int, float, np.number)) and 0 < temperature
 
-        sigma_equal_strength_max = 0.5 * self.material.density(temperature) * rotation_frequency ** 2
-        sigma_equal_strength_max *= (radius1 ** 2 - radius0 ** 2)
-
-        f_area_equal_strength = lambda z: \
-            (self.__area[-1] *
-             exp(self.material.density(temperature) * rotation_frequency ** 2 / sigma_equal_strength_max) *
-             integrate.quad(z, z, radius_equal_strength)) \
-                if z <= radius_equal_strength else self.__area[-1]
-
-        f_force_r_equal_strength = lambda z: \
-            (self.material.density(temperature) * rotation_frequency ** 2 *
-             (integrate.quad(f_area_equal_strength(z) * z, z, radius1) +
-              sum([b['radius'] * b['volume'] for b in self.bondages])))
-
-        return {'radius': radius_equal_strength, }
+        plt.show()
 
     def tensions(self, rotation_frequency: float | int | np.number, pressure, density, show=True):
         """Расчет на прочность"""
