@@ -4,6 +4,7 @@ from numpy import nan, isnan, pi, sqrt, exp, log as ln, array, linspace, arange,
 from scipy import interpolate, integrate
 import matplotlib.pyplot as plt
 
+import decorators
 from material import Material
 from airfoil import Airfoil
 
@@ -26,7 +27,7 @@ REFERENCES = MappingProxyType({
 class Blade:
     """Лопатка/винт/лопасть"""
     __slots__ = ('__material', '__sections', '__bondages',
-                 '__height', '__area', '__f_area')
+                 '__height', '__area', '__f_area', '__volume')
 
     @classmethod
     def help(cls):
@@ -34,6 +35,7 @@ class Blade:
         print('Расчет на прочность')
         return version
 
+    @decorators.timeit()
     def __init__(self, material: Material, sections: dict[float | int | np.number: list, tuple, np.ndarray],
                  bondages: tuple[dict] | list[dict] = tuple()) -> None:
         # проверка на тип данных material
@@ -59,8 +61,6 @@ class Blade:
         self.__sections = dict(sorted(sections.items(), key=lambda item: item[0]))  # сортировка по высоте
         self.__bondages = bondages  # бондажи
 
-        self.__height = max(self.__sections.keys()) - min(self.__sections.keys())
-
         self.__area = dict()
         for z, section in self.__sections.items():
             upper_lower = self.upper_lower(section)
@@ -73,6 +73,10 @@ class Blade:
             self.__area[z] = area_upper - area_lower
         self.__f_area = interpolate.interp1d(list(self.__area.keys()), list(self.__area.values()),
                                              kind=1, fill_value='extrapolate')
+
+        radius0, *_, radius1 = tuple(self.__sections.keys())
+        self.__height = radius1 - radius0
+        self.__volume = integrate.quad(self.__f_area, radius0, radius1)[0]
 
     @property
     def material(self) -> Material:
@@ -89,6 +93,13 @@ class Blade:
     @property
     def height(self) -> float:
         return self.__height
+
+    @property
+    def volume(self) -> float:
+        return self.__volume
+
+    def mass(self, temperature: float | int | np.number) -> float:
+        return float(self.material.density(temperature) * self.volume)
 
     @property
     def radius_equal_strength(self) -> float:
@@ -143,7 +154,27 @@ class Blade:
             ax.set_ylabel('y', fontsize=12)
             ax.set_zlabel('z', fontsize=12)
 
+        plt.tight_layout()
         plt.show()
+
+    def radial_force(self, rotation_frequency: float | int | np.number,
+                     temperature: float | int | np.number):
+        assert isinstance(rotation_frequency, (int, float, np.number))
+        assert isinstance(temperature, (int, float, np.number)) and 0 < temperature
+
+        radius1 = tuple(self.__sections.keys())[-1]  # радиус периферии
+
+        return lambda z: \
+            (self.material.density(temperature) * rotation_frequency ** 2 *
+             (integrate.quad(lambda r: self.__f_area(r) * r, z, radius1)[0] +
+              sum([b['radius'] * b['volume'] for b in self.bondages])))
+
+    def radial_tension(self, rotation_frequency: float | int | np.number,
+                       temperature: float | int | np.number):
+        assert isinstance(rotation_frequency, (int, float, np.number))
+        assert isinstance(temperature, (int, float, np.number)) and 0 < temperature
+
+        return lambda z: (self.radial_force(rotation_frequency, temperature)(z) / self.__f_area(z))
 
     def area_equal_strength(self, rotation_frequency: float | int | np.number):
         assert isinstance(rotation_frequency, (int, float, np.number))
@@ -167,8 +198,16 @@ class Blade:
              (integrate.quad(lambda r: self.area_equal_strength(rotation_frequency)(r) * r, z, radius1)[0] +
               sum([b['radius'] * b['volume'] for b in self.bondages])))
 
+    def radial_tension_equal_strength(self, rotation_frequency: float | int | np.number,
+                                      temperature: float | int | np.number):
+        assert isinstance(rotation_frequency, (int, float, np.number))
+        assert isinstance(temperature, (int, float, np.number)) and 0 < temperature
+
+        return lambda z: (self.radial_force_equal_strength(rotation_frequency, temperature)(z) /
+                          self.area_equal_strength(rotation_frequency)(z))
+
     def show_equal_strength(self, rotation_frequency: float | int | np.number,
-                            temperature: float | int | np.number, discreteness: int = 1_000, **kwargs) -> None:
+                            temperature: float | int | np.number, discreteness: int = 100, **kwargs) -> None:
         """Визуализация равнопрочности"""
         assert isinstance(rotation_frequency, (int, float, np.number))
         assert isinstance(temperature, (int, float, np.number)) and 0 < temperature
@@ -177,7 +216,7 @@ class Blade:
         radius0, *_, radius1 = tuple(self.__sections.keys())  # радиус втулки и периферии
         radius = linspace(radius0, radius1, discreteness, endpoint=True)
 
-        fg = plt.figure(figsize=kwargs.pop('figsize', (12, 6)))
+        fg = plt.figure(figsize=kwargs.pop('figsize', (16, 8)))
         gs = fg.add_gridspec(nrows=1, ncols=3)
         plt.suptitle('Equal strength', fontsize=16, fontweight='bold')
 
@@ -186,28 +225,37 @@ class Blade:
         plt.plot([self.area_equal_strength(rotation_frequency)(r) for r in radius], radius,
                  color='green', ls='solid', linewidth=2, label='equal strength')
         plt.grid(True)
-        plt.xlabel('area'), plt.ylabel('radius')
+        plt.xlabel('area', fontsize=12), plt.ylabel('radius', fontsize=12)
         plt.legend()
 
         fg.add_subplot(gs[0, 1])
+        plt.plot([self.radial_force(rotation_frequency, temperature)(r) for r in radius], radius,
+                 color='black', ls='solid', linewidth=2, label='in fact')
         plt.plot([self.radial_force_equal_strength(rotation_frequency, temperature)(r) for r in radius], radius,
-                 color='blue', ls='solid', linewidth=2)
+                 color='blue', ls='solid', linewidth=2, label='equal strength')
         plt.grid(True)
-        plt.xlabel('radial force'), plt.ylabel('radius')
+        plt.xlabel('radial force', fontsize=12), plt.ylabel('radius', fontsize=12)
+        plt.legend()
 
         fg.add_subplot(gs[0, 2])
-        # TODO
+        plt.plot([self.radial_tension(rotation_frequency, temperature)(r) for r in radius], radius,
+                 color='black', ls='solid', linewidth=2, label='in fact')
+        plt.plot([self.radial_tension_equal_strength(rotation_frequency, temperature)(r) for r in radius], radius,
+                 color='red', ls='solid', linewidth=2, label='equal strength')
         plt.grid(True)
-        plt.xlabel('radial tension'), plt.ylabel('radius')
+        plt.xlabel('radial tension', fontsize=12), plt.ylabel('radius', fontsize=12)
+        plt.legend()
 
+        plt.tight_layout()
         plt.show()
 
-    def tensions(self, rotation_frequency: float | int | np.number,
+    def tensions(self, amount: int | np.integer, rotation_frequency: float | int | np.number,
                  density: tuple[dict] = tuple(),
                  pressure: tuple[dict] = tuple(),
                  velocity_axial: tuple[dict] = tuple(), velocity_tangential: tuple[dict] = tuple(),
                  show=True):
         """Расчет на прочность"""
+        assert isinstance(amount, (int, np.integer)) and 1 <= amount
         assert isinstance(rotation_frequency, (float, int, np.number))
 
         assert isinstance(density, (tuple, list))
@@ -221,12 +269,13 @@ class Blade:
                 assert 0 < value
         density_inlet = dict(sorted(density[0].items(), key=lambda item: item[0], reverse=False))
         density_outlet = dict(sorted(density[-1].items(), key=lambda item: item[0], reverse=False))
-        f_density_inlet = interpolate.interp1d(density_inlet.keys(), density_inlet.values(),
+        f_density_inlet = interpolate.interp1d(tuple(density_inlet.keys()), tuple(density_inlet.values()),
                                                kind=len(density_inlet) - 1 if len(density_inlet) <= 4 else 3,
                                                fill_value='extrapolate')
-        f_density_outlet = interpolate.interp1d(density_outlet.keys(), density_outlet.values(),
+        f_density_outlet = interpolate.interp1d(tuple(density_outlet.keys()), tuple(density_outlet.values()),
                                                 kind=len(density_outlet) - 1 if len(density_outlet) <= 4 else 3,
                                                 fill_value='extrapolate')
+        f_density = lambda z: (f_density_inlet(z) + f_density_outlet(z)) / 2
 
         assert isinstance(pressure, (tuple, list))
         for d in pressure:
@@ -239,10 +288,10 @@ class Blade:
                 assert 0 < value
         pressure_inlet = dict(sorted(pressure[0].items(), key=lambda item: item[0], reverse=False))
         pressure_outlet = dict(sorted(pressure[-1].items(), key=lambda item: item[0], reverse=False))
-        f_pressure_inlet = interpolate.interp1d(pressure_inlet.keys(), pressure_inlet.values(),
+        f_pressure_inlet = interpolate.interp1d(tuple(pressure_inlet.keys()), tuple(pressure_inlet.values()),
                                                 kind=len(pressure_inlet) - 1 if len(pressure_inlet) <= 4 else 3,
                                                 fill_value='extrapolate')
-        f_pressure_outlet = interpolate.interp1d(pressure_outlet.keys(), pressure_outlet.values(),
+        f_pressure_outlet = interpolate.interp1d(tuple(pressure_outlet.keys()), tuple(pressure_outlet.values()),
                                                  kind=len(pressure_outlet) - 1 if len(pressure_outlet) <= 4 else 3,
                                                  fill_value='extrapolate')
 
@@ -256,11 +305,13 @@ class Blade:
                 assert 0 <= radius
         velocity_axial_inlet = dict(sorted(velocity_axial[0].items(), key=lambda item: item[0], reverse=False))
         velocity_axial_outlet = dict(sorted(velocity_axial[-1].items(), key=lambda item: item[0], reverse=False))
-        f_velocity_axial_inlet = interpolate.interp1d(velocity_axial_inlet.keys(), velocity_axial_inlet.values(),
+        f_velocity_axial_inlet = interpolate.interp1d(tuple(velocity_axial_inlet.keys()),
+                                                      tuple(velocity_axial_inlet.values()),
                                                       kind=len(velocity_axial_inlet) - 1
                                                       if len(velocity_axial_inlet) <= 4 else 3,
                                                       fill_value='extrapolate')
-        f_velocity_axial_outlet = interpolate.interp1d(velocity_axial_outlet.keys(), velocity_axial_outlet.values(),
+        f_velocity_axial_outlet = interpolate.interp1d(tuple(velocity_axial_outlet.keys()),
+                                                       tuple(velocity_axial_outlet.values()),
                                                        kind=len(velocity_axial_outlet) - 1
                                                        if len(velocity_axial_outlet) <= 4 else 3,
                                                        fill_value='extrapolate')
@@ -277,18 +328,27 @@ class Blade:
                                                 key=lambda item: item[0], reverse=False))
         velocity_tangential_outlet = dict(sorted(velocity_tangential[-1].items(),
                                                  key=lambda item: item[0], reverse=False))
-        f_velocity_tangential_inlet = interpolate.interp1d(velocity_tangential_inlet.keys(),
-                                                           velocity_tangential_inlet.values(),
+        f_velocity_tangential_inlet = interpolate.interp1d(tuple(velocity_tangential_inlet.keys()),
+                                                           tuple(velocity_tangential_inlet.values()),
                                                            kind=len(velocity_tangential_inlet) - 1
                                                            if len(velocity_tangential_inlet) <= 4 else 3,
                                                            fill_value='extrapolate')
-        f_velocity_tangential_outlet = interpolate.interp1d(velocity_tangential_outlet.keys(),
-                                                            velocity_tangential_outlet.values(),
+        f_velocity_tangential_outlet = interpolate.interp1d(tuple(velocity_tangential_outlet.keys()),
+                                                            tuple(velocity_tangential_outlet.values()),
                                                             kind=len(velocity_tangential_outlet) - 1
                                                             if len(velocity_tangential_outlet) <= 4 else 3,
                                                             fill_value='extrapolate')
+        radius1 = tuple(self.sections.keys())[-1]
 
-        N = 0
+        qx = lambda z: (2 * pi * z / amount *
+                        ((f_pressure_inlet(z) - f_pressure_outlet(z)) -
+                         f_density(z) *
+                         f_velocity_axial_inlet(z) * (f_velocity_axial_outlet(z) - f_velocity_axial_inlet(z))))
+        qy = lambda z: (2 * pi * z / amount *
+                        f_density(z) *
+                        f_velocity_axial_inlet(z) * (f_velocity_tangential_outlet(z) - f_velocity_tangential_inlet(z)))
+        mx = lambda z: integrate.quad(lambda zz: qx(zz) * (zz - z), z, radius1)[0]
+        my = lambda z: -integrate.quad(lambda zz: qy(zz) * (zz - z), z, radius1)[0]
 
         if show: self.__show_tensions()
         return
@@ -355,7 +415,7 @@ def test():
     blades = list()
 
     if 1:
-        material = Material('ЖС-40', {'density': 8600})
+        material = Material('ЖС-40', {'density': 8_600})
 
         airfoil0 = Airfoil('BMSTU', 40, 1, radians(20),
                            rotation_angle=radians(60), relative_inlet_radius=0.06, relative_outlet_radius=0.03,
@@ -381,7 +441,10 @@ def test():
         blade.show(2)
         blade.show(3)
 
-        print(f'{blade.radius_equal_strength=}')
+        print(f'{blade.height = }')
+        print(f'{blade.volume = }')
+        print(f'{blade.mass(800) = }')
+        print(f'{blade.radius_equal_strength = }')
 
         blade.show_equal_strength(2800, 800)
 
@@ -413,9 +476,12 @@ def test():
                                       0.6: 10 ** 5,
                                       0.7: 10 ** 5, }
 
-        tensions = blade.tensions(2800,
-                                  density_inlet=density_inlet, density_outlet=density_outlet,
-                                  pressure_inlet=pressure_inlet, show=True)
+        tensions = blade.tensions(44, 2800,
+                                  density=(density_inlet, density_outlet),
+                                  pressure=(pressure_inlet, pressure_outlet),
+                                  velocity_axial=(velocity_axial_inlet, velocity_axial_outlet),
+                                  velocity_tangential=(velocity_tangential_inlet, velocity_tangential_outlet),
+                                  show=True)
 
 
 if __name__ == '__main__':
