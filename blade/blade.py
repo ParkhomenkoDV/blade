@@ -75,15 +75,15 @@ class Blade:
                                              kind=1, fill_value='extrapolate')
 
     @property
-    def material(self):
+    def material(self) -> Material:
         return self.__material
 
     @property
-    def sections(self):
+    def sections(self) -> dict:
         return self.__sections
 
     @property
-    def bondages(self):
+    def bondages(self) -> dict:
         return self.__bondages
 
     @property
@@ -93,9 +93,9 @@ class Blade:
     @property
     def radius_equal_strength(self) -> float:
         """Радиус равнопрочности"""
-        ksi = self.__area[-1] / self.__area[0]
+        area0, *_, area1 = tuple(self.__area.values())  # площадь сечений втулки и периферии
         radius0, *_, radius1 = tuple(self.__sections.keys())  # радиус втулки и периферии
-        return sqrt((radius0 ** 2 - radius1 ** 2 * ln(ksi)) / (1 - ln(ksi)))
+        return float(sqrt((radius0 ** 2 - radius1 ** 2 * ln(area1 / area0)) / (1 - ln(area1 / area0))))
 
     @staticmethod
     def upper_lower(coordinates: tuple[tuple[float, float], ...]) -> dict[str:tuple[tuple[float, float], ...]]:
@@ -120,6 +120,7 @@ class Blade:
 
         if 2 == D:
             plt.figure(figsize=kwargs.pop('figsize', (8, 8)))
+            plt.title('Blade', fontsize=14, fontweight='bold')
             plt.axis('equal')
             plt.grid(True)
             for i, (r, section) in enumerate(self.__sections.items()):
@@ -148,10 +149,11 @@ class Blade:
         assert isinstance(rotation_frequency, (int, float, np.number))
 
         radius1 = tuple(self.__sections.keys())[-1]  # радиус периферии
+        area1 = tuple(self.__area.values())[-1]  # площадь периферии
 
-        return lambda z: (self.__area[-1] * exp(2 / (radius1 ** 2 - self.radius_equal_strength ** 2) *
-                                                integrate.quad(z, z, self.radius_equal_strength))) \
-            if z <= self.radius_equal_strength else self.__area[-1]
+        return lambda z: (area1 * exp((self.radius_equal_strength ** 2 - z ** 2) /
+                                      (radius1 ** 2 - self.radius_equal_strength ** 2))) \
+            if z <= self.radius_equal_strength else area1
 
     def radial_force_equal_strength(self, rotation_frequency: float | int | np.number,
                                     temperature: float | int | np.number):
@@ -160,18 +162,42 @@ class Blade:
 
         radius1 = tuple(self.__sections.keys())[-1]  # радиус периферии
 
-        return lambda z: (self.material.density(temperature) * rotation_frequency ** 2 *
-                          (integrate.quad(self.area_equal_strength(z) * z, z, radius1) +
-                           sum([b['radius'] * b['volume'] for b in self.bondages])))
+        return lambda z: \
+            (self.material.density(temperature) * rotation_frequency ** 2 *
+             (integrate.quad(lambda r: self.area_equal_strength(rotation_frequency)(r) * r, z, radius1)[0] +
+              sum([b['radius'] * b['volume'] for b in self.bondages])))
 
     def show_equal_strength(self, rotation_frequency: float | int | np.number,
-                            temperature: float | int | np.number, dis: int = 1_000) -> None:
+                            temperature: float | int | np.number, dis: int = 1_000, **kwargs) -> None:
         """Визуализация равнопрочности"""
         assert isinstance(rotation_frequency, (int, float, np.number))
         assert isinstance(temperature, (int, float, np.number)) and 0 < temperature
 
-        radius0, *_, radius1 = tuple(self.__sections.keys())[-1]  # радиус втулки и периферии
+        radius0, *_, radius1 = tuple(self.__sections.keys())  # радиус втулки и периферии
         radius = linspace(radius0, radius1, dis, endpoint=True)
+
+        fg = plt.figure(figsize=kwargs.pop('figsize', (12, 6)))
+        gs = fg.add_gridspec(nrows=1, ncols=3)
+        plt.suptitle('Equal strength', fontsize=16, fontweight='bold')
+
+        fg.add_subplot(gs[0, 0])
+        plt.plot(self.__f_area(radius), radius, color='black', ls='solid', linewidth=2, label='in fact')
+        plt.plot([self.area_equal_strength(rotation_frequency)(r) for r in radius], radius,
+                 color='green', ls='solid', linewidth=2, label='equal strength')
+        plt.grid(True)
+        plt.xlabel('area'), plt.ylabel('radius')
+        plt.legend()
+
+        fg.add_subplot(gs[0, 1])
+        plt.plot([self.radial_force_equal_strength(rotation_frequency, temperature)(r) for r in radius], radius,
+                 color='blue', ls='solid', linewidth=2)
+        plt.grid(True)
+        plt.xlabel('radial force'), plt.ylabel('radius')
+
+        fg.add_subplot(gs[0, 2])
+
+        plt.grid(True)
+        plt.xlabel('radial tension'), plt.ylabel('radius')
 
         plt.show()
 
@@ -184,10 +210,11 @@ class Blade:
         if show: self.__show_tensions()
         return
 
-    def __show_tensions(self):
+    def __show_tensions(self, **kwargs):
         """Визуализация расчет на прочность"""
 
-        plt.figure(figsize=(12, 8))
+        fg = plt.figure(figsize=kwargs.pop('figsize', (12, 6)))
+        gs = fg.add_gridspec(nrows=1, ncols=3)
         plt.show()
 
     def natural_frequencies(self, radius: int, max_k: int) -> tuple[float, str]:
@@ -230,8 +257,7 @@ class Blade:
                     resonance.add(round(x0, 6))
                     plt.scatter(x0, k * x0, color='red')
         plt.plot(rotation_frequency, f, color='black', linestyle='solid', linewidth=2, label='f')
-        plt.xlabel('Frequency [1/s]', fontsize=12)
-        plt.ylabel('Frequency [1/s]', fontsize=12)
+        plt.xlabel('Frequency [1/s]', fontsize=12), plt.ylabel('Frequency [1/s]', fontsize=12)
         plt.grid(True)
         plt.legend(fontsize=12)
         plt.show()
@@ -271,6 +297,10 @@ def test():
     for blade in blades:
         blade.show(2)
         blade.show(3)
+
+        print(f'{blade.radius_equal_strength=}')
+
+        blade.show_equal_strength(2800, 800)
 
         pressure = {0.5: (10 ** 5, 10 ** 5),
                     0.6: (10 ** 5, 10 ** 5),
