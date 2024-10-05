@@ -203,24 +203,24 @@ class Blade:
         plt.show()
 
     def tensions(self, rotation_frequency: float | int | np.number,
-                 density_inlet: dict, density_outlet: dict,
-                 pressure_inlet: dict, pressure_outlet: dict,
-                 velocity_axial_inlet: dict, velocity_axial_outlet: dict,
-                 velocity_tangential_inlet: dict, velocity_tangential_outlet: dict,
+                 density: tuple[dict] = tuple(),
+                 pressure: tuple[dict] = tuple(),
+                 velocity_axial: tuple[dict] = tuple(), velocity_tangential: tuple[dict] = tuple(),
                  show=True):
         """Расчет на прочность"""
         assert isinstance(rotation_frequency, (float, int, np.number))
 
-        assert isinstance(density_inlet, dict) and isinstance(density_outlet, dict)
-        assert 1 <= len(density_inlet) and 1 <= len(density_outlet)
-        assert all(isinstance(radius, (float, int, np.number)) and isinstance(density, (float, int, np.number))
-                   for radius, density in density_inlet.items())
-        assert all(isinstance(radius, (float, int, np.number)) and isinstance(density, (float, int, np.number))
-                   for radius, density in density_outlet.items())
-        assert all(0 <= radius and 0 < density for radius, density in density_inlet.items())
-        assert all(0 <= radius and 0 < density for radius, density in density_outlet.items())
-        density_inlet = dict(sorted(density_inlet.items(), key=lambda item: item[0], reverse=False))
-        density_outlet = dict(sorted(density_outlet.items(), key=lambda item: item[0], reverse=False))
+        assert isinstance(density, (tuple, list))
+        for d in density:
+            assert isinstance(d, dict)
+            assert 0 < len(d)
+            for radius, value in d.items():
+                assert isinstance(radius, (float, int, np.number))
+                assert isinstance(value, (float, int, np.number))
+                assert 0 <= radius
+                assert 0 < value
+        density_inlet = dict(sorted(density[0].items(), key=lambda item: item[0], reverse=False))
+        density_outlet = dict(sorted(density[-1].items(), key=lambda item: item[0], reverse=False))
         f_density_inlet = interpolate.interp1d(density_inlet.keys(), density_inlet.values(),
                                                kind=len(density_inlet) - 1 if len(density_inlet) <= 4 else 3,
                                                fill_value='extrapolate')
@@ -228,16 +228,17 @@ class Blade:
                                                 kind=len(density_outlet) - 1 if len(density_outlet) <= 4 else 3,
                                                 fill_value='extrapolate')
 
-        assert isinstance(pressure_inlet, dict) and isinstance(pressure_outlet, dict)
-        assert 1 <= len(pressure_inlet) and 1 <= len(pressure_outlet)
-        assert all(isinstance(radius, (float, int, np.number)) and isinstance(pressure, (float, int, np.number))
-                   for radius, pressure in pressure_inlet.items())
-        assert all(isinstance(radius, (float, int, np.number)) and isinstance(pressure, (float, int, np.number))
-                   for radius, pressure in pressure_outlet.items())
-        assert all(0 <= radius and 0 < pressure for radius, pressure in pressure_inlet.items())
-        assert all(0 <= radius and 0 < pressure for radius, pressure in pressure_outlet.items())
-        pressure_inlet = dict(sorted(pressure_inlet.items(), key=lambda item: item[0], reverse=False))
-        pressure_outlet = dict(sorted(pressure_outlet.items(), key=lambda item: item[0], reverse=False))
+        assert isinstance(pressure, (tuple, list))
+        for d in pressure:
+            assert isinstance(d, dict)
+            assert 0 < len(d)
+            for radius, value in d.items():
+                assert isinstance(radius, (float, int, np.number))
+                assert isinstance(value, (float, int, np.number))
+                assert 0 <= radius
+                assert 0 < value
+        pressure_inlet = dict(sorted(pressure[0].items(), key=lambda item: item[0], reverse=False))
+        pressure_outlet = dict(sorted(pressure[-1].items(), key=lambda item: item[0], reverse=False))
         f_pressure_inlet = interpolate.interp1d(pressure_inlet.keys(), pressure_inlet.values(),
                                                 kind=len(pressure_inlet) - 1 if len(pressure_inlet) <= 4 else 3,
                                                 fill_value='extrapolate')
@@ -245,16 +246,16 @@ class Blade:
                                                  kind=len(pressure_outlet) - 1 if len(pressure_outlet) <= 4 else 3,
                                                  fill_value='extrapolate')
 
-        assert isinstance(velocity_axial_inlet, dict) and isinstance(velocity_axial_outlet, dict)
-        assert 1 <= len(velocity_axial_inlet) and 1 <= len(velocity_axial_outlet)
-        assert all(isinstance(radius, (float, int, np.number)) and isinstance(velocity, (float, int, np.number))
-                   for radius, velocity in velocity_axial_inlet.items())
-        assert all(isinstance(radius, (float, int, np.number)) and isinstance(velocity, (float, int, np.number))
-                   for radius, velocity in velocity_axial_outlet.items())
-        assert all(0 <= radius for radius, velocity in velocity_axial_inlet.items())
-        assert all(0 <= radius for radius, velocity in velocity_axial_outlet.items())
-        velocity_axial_inlet = dict(sorted(velocity_axial_inlet.items(), key=lambda item: item[0], reverse=False))
-        velocity_axial_outlet = dict(sorted(velocity_axial_outlet.items(), key=lambda item: item[0], reverse=False))
+        assert isinstance(velocity_axial, (tuple, list))
+        for d in pressure:
+            assert isinstance(d, dict)
+            assert 0 < len(d)
+            for radius, value in d.items():
+                assert isinstance(radius, (float, int, np.number))
+                assert isinstance(value, (float, int, np.number))
+                assert 0 <= radius
+        velocity_axial_inlet = dict(sorted(velocity_axial[0].items(), key=lambda item: item[0], reverse=False))
+        velocity_axial_outlet = dict(sorted(velocity_axial[-1].items(), key=lambda item: item[0], reverse=False))
         f_velocity_axial_inlet = interpolate.interp1d(velocity_axial_inlet.keys(), velocity_axial_inlet.values(),
                                                       kind=len(velocity_axial_inlet) - 1
                                                       if len(velocity_axial_inlet) <= 4 else 3,
@@ -264,17 +265,17 @@ class Blade:
                                                        if len(velocity_axial_outlet) <= 4 else 3,
                                                        fill_value='extrapolate')
 
-        assert isinstance(velocity_tangential_inlet, dict) and isinstance(velocity_tangential_outlet, dict)
-        assert 1 <= len(velocity_tangential_inlet) and 1 <= len(velocity_tangential_outlet)
-        assert all(isinstance(radius, (float, int, np.number)) and isinstance(velocity, (float, int, np.number))
-                   for radius, velocity in velocity_tangential_inlet.items())
-        assert all(isinstance(radius, (float, int, np.number)) and isinstance(velocity, (float, int, np.number))
-                   for radius, velocity in velocity_tangential_outlet.items())
-        assert all(0 <= radius for radius, velocity in velocity_tangential_inlet.items())
-        assert all(0 <= radius for radius, velocity in velocity_tangential_outlet.items())
-        velocity_tangential_inlet = dict(sorted(velocity_tangential_inlet.items(),
+        assert isinstance(velocity_tangential, (tuple, list))
+        for d in pressure:
+            assert isinstance(d, dict)
+            assert 0 < len(d)
+            for radius, value in d.items():
+                assert isinstance(radius, (float, int, np.number))
+                assert isinstance(value, (float, int, np.number))
+                assert 0 <= radius
+        velocity_tangential_inlet = dict(sorted(velocity_tangential[0].items(),
                                                 key=lambda item: item[0], reverse=False))
-        velocity_tangential_outlet = dict(sorted(velocity_tangential_outlet.items(),
+        velocity_tangential_outlet = dict(sorted(velocity_tangential[-1].items(),
                                                  key=lambda item: item[0], reverse=False))
         f_velocity_tangential_inlet = interpolate.interp1d(velocity_tangential_inlet.keys(),
                                                            velocity_tangential_inlet.values(),
@@ -384,23 +385,37 @@ def test():
 
         blade.show_equal_strength(2800, 800)
 
-        pressure = {0.5: (10 ** 5, 10 ** 5),
-                    0.6: (10 ** 5, 10 ** 5),
-                    0.7: (10 ** 5, 10 ** 5)}
+        pressure_inlet = {0.5: 10 ** 5,
+                          0.6: 10 ** 5,
+                          0.7: 10 ** 5, }
+        pressure_outlet = {0.5: 10 ** 5,
+                           0.6: 10 ** 5,
+                           0.7: 10 ** 5, }
 
-        density = {0.5: (10 ** 5, 10 ** 5),
-                   0.6: (10 ** 5, 10 ** 5),
-                   0.7: (10 ** 5, 10 ** 5)}
+        density_inlet = {0.5: 10 ** 5,
+                         0.6: 10 ** 5,
+                         0.7: 10 ** 5, }
+        density_outlet = {0.5: 10 ** 5,
+                          0.6: 10 ** 5,
+                          0.7: 10 ** 5, }
 
-        velocity_a = {0.5: (10 ** 5, 10 ** 5),
-                      0.6: (10 ** 5, 10 ** 5),
-                      0.7: (10 ** 5, 10 ** 5)}
+        velocity_axial_inlet = {0.5: 10 ** 5,
+                                0.6: 10 ** 5,
+                                0.7: 10 ** 5, }
+        velocity_axial_outlet = {0.5: 10 ** 5,
+                                 0.6: 10 ** 5,
+                                 0.7: 10 ** 5, }
 
-        velocity_t = {0.5: (10 ** 5, 10 ** 5),
-                      0.6: (10 ** 5, 10 ** 5),
-                      0.7: (10 ** 5, 10 ** 5)}
+        velocity_tangential_inlet = {0.5: 10 ** 5,
+                                     0.6: 10 ** 5,
+                                     0.7: 10 ** 5, }
+        velocity_tangential_outlet = {0.5: 10 ** 5,
+                                      0.6: 10 ** 5,
+                                      0.7: 10 ** 5, }
 
-        tensions = blade.tensions(2800, pressure=pressure, density=density, show=True)
+        tensions = blade.tensions(2800,
+                                  density_inlet=density_inlet, density_outlet=density_outlet,
+                                  pressure_inlet=pressure_inlet, show=True)
 
 
 if __name__ == '__main__':
