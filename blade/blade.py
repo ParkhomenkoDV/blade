@@ -125,7 +125,7 @@ class Blade:
         # if upper[-1][0] != 0: upper.append((0, ?)) # неизвестен y входной кромки
         return {'upper': tuple(upper[::-1]), 'lower': tuple(lower)}
 
-    def show(self, D: int, **kwargs):
+    def show(self, D: int, **kwargs) -> None:
         """Визуализация"""
         assert isinstance(D, int) and D in (2, 3)  # мерность пространства
 
@@ -338,6 +338,7 @@ class Blade:
                                                             kind=len(velocity_tangential_outlet) - 1
                                                             if len(velocity_tangential_outlet) <= 4 else 3,
                                                             fill_value='extrapolate')
+
         radius1 = tuple(self.sections.keys())[-1]
 
         qx = lambda z: (2 * pi * z / amount *
@@ -350,13 +351,16 @@ class Blade:
         mx = lambda z: integrate.quad(lambda zz: qx(zz) * (zz - z), z, radius1)[0]
         my = lambda z: -integrate.quad(lambda zz: qy(zz) * (zz - z), z, radius1)[0]
 
+        x_pressure = 0.25 * nan
+        y_pressure = nan
+
         if show: self.__show_tensions()
         return
 
     def __show_tensions(self, **kwargs):
         """Визуализация расчет на прочность"""
 
-        fg = plt.figure(figsize=kwargs.pop('figsize', (12, 6)))
+        fg = plt.figure(figsize=kwargs.pop('figsize', (18, 8)))
         gs = fg.add_gridspec(nrows=1, ncols=3)
         plt.show()
 
