@@ -27,7 +27,8 @@ REFERENCES = MappingProxyType({
 class Blade:
     """Лопатка/винт/лопасть"""
     __slots__ = ('__material', '__sections', '__bondages',
-                 '__height', '__area', '__f_area', '__volume')
+                 '__height', '__volume', '__chords',
+                 '__f_area',)
 
     @classmethod
     def help(cls):
@@ -51,15 +52,15 @@ class Blade:
         assert all(isinstance(x, (int, float, np.number)) and isinstance(y, (int, float, np.number))
                    for el in sections.values() for x, y in el)
         sections = dict(sorted(sections.items(), key=lambda item: item[0]))  # сортировка сечений по высоте
-        self.__sections, chords = dict(), dict()
+        self.__sections, self.__chords = dict(), dict()
         for radius, section in sections.items():  # TODO: multiprocessing
             x, y = array(section).T
             xmin, xmax = x.min(), x.max()
-            chords[radius] = xmax - xmin
+            self.__chords[radius] = xmax - xmin
             upper_lower = self.upper_lower(section)
             self.__sections[radius] = Airfoil('MANUAL', 100,
                                               upper=upper_lower['upper'], lower=upper_lower['lower'], deg=1)
-            self.__sections[radius].properties
+            self.__sections[radius].properties  # расчет характеристик профиля
 
         assert isinstance(bondages, (tuple, list))
         assert all(isinstance(bondage, dict) for bondage in bondages)
@@ -70,7 +71,7 @@ class Blade:
         self.__bondages = bondages  # бондажи
 
         self.__f_area = interpolate.interp1d(list(self.__sections.keys()),
-                                             [airfoil.properties['area'] * chords[radius]
+                                             [airfoil.properties['area'] * self.__chords[radius]
                                               for radius, airfoil in self.__sections.items()],
                                              kind=1, fill_value='extrapolate')
 
@@ -134,8 +135,8 @@ class Blade:
             plt.title('Blade', fontsize=14, fontweight='bold')
             plt.axis('equal')
             plt.grid(True)
-            for i, (r, section) in enumerate(self.__sections.items()):
-                plt.plot(*array(section, dtype='float16').T,
+            for i, (r, airfoil) in enumerate(self.__sections.items()):
+                plt.plot(*array(airfoil.coordinates, dtype='float16').T,
                          color='black', ls='solid', linewidth=(1 + 2 / (len(self.__sections) - 1) * i))
 
         elif 3 == D:
@@ -144,8 +145,9 @@ class Blade:
             plt.figure(figsize=kwargs.pop('figsize', (8, 8)))
             ax = plt.axes(projection='3d')
             ax.axis('equal')
-            for z, section in self.__sections.items():
-                x, y = array(section, dtype='float16').T
+            for z, airfoil in self.__sections.items():
+                x, y = array(airfoil.coordinates, dtype='float16').T
+                x = x * self.__chords[z]
                 vertices = [list(zip(x, y, [z] * len(x)))]
                 poly = Poly3DCollection(vertices, color='black', alpha=0.8)
                 ax.add_collection3d(poly)
