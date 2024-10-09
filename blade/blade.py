@@ -40,6 +40,7 @@ class Blade:
                  bondages: tuple[dict] | list[dict] = tuple()) -> None:
         # проверка на тип данных material
         assert isinstance(material, Material)
+        self.__material = material
 
         assert isinstance(sections, dict)
         assert all(isinstance(key, (int, float, np.number)) for key in sections.keys())
@@ -49,6 +50,16 @@ class Blade:
         assert all(len(coord) == 2 for value in sections.values() for coord in value)  # x, y
         assert all(isinstance(x, (int, float, np.number)) and isinstance(y, (int, float, np.number))
                    for el in sections.values() for x, y in el)
+        sections = dict(sorted(sections.items(), key=lambda item: item[0]))  # сортировка сечений по высоте
+        self.__sections, chords = dict(), dict()
+        for radius, section in sections.items():  # TODO: multiprocessing
+            x, y = array(section).T
+            xmin, xmax = x.min(), x.max()
+            chords[radius] = xmax - xmin
+            upper_lower = self.upper_lower(section)
+            self.__sections[radius] = Airfoil('MANUAL', 100,
+                                              upper=upper_lower['upper'], lower=upper_lower['lower'], deg=1)
+            self.__sections[radius].properties
 
         assert isinstance(bondages, (tuple, list))
         assert all(isinstance(bondage, dict) for bondage in bondages)
@@ -56,22 +67,11 @@ class Blade:
         assert all(isinstance(bondage['radius'], (int, float, np.number)) and
                    isinstance(bondage['volume'], (int, float, np.number)) for bondage in bondages)
         assert all(0 <= bondage['radius'] and 0 <= bondage['volume'] for bondage in bondages)
-
-        self.__material = material  # материал
-        self.__sections = dict(sorted(sections.items(), key=lambda item: item[0]))  # сортировка по высоте
         self.__bondages = bondages  # бондажи
 
-        self.__area = dict()
-        for z, section in self.__sections.items():
-            upper_lower = self.upper_lower(section)
-            xu, yu = array(upper_lower['upper'], dtype='float32').T
-            xl, yl = array(upper_lower['lower'], dtype='float32').T
-            fu = interpolate.interp1d(xu, yu, kind=1, fill_value='extrapolate')
-            fl = interpolate.interp1d(xl, yl, kind=1, fill_value='extrapolate')
-            area_upper = integrate.quad(fu, xu[0], xu[-1], limit=len(xu), points=xu)[0]
-            area_lower = integrate.quad(fl, xl[0], xl[-1], limit=len(xl), points=xl)[0]
-            self.__area[z] = area_upper - area_lower
-        self.__f_area = interpolate.interp1d(list(self.__area.keys()), list(self.__area.values()),
+        self.__f_area = interpolate.interp1d(list(self.__sections.keys()),
+                                             [airfoil.properties['area'] * chords[radius]
+                                              for radius, airfoil in self.__sections.items()],
                                              kind=1, fill_value='extrapolate')
 
         radius0, *_, radius1 = tuple(self.__sections.keys())
