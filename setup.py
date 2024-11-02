@@ -9,7 +9,7 @@ with open('requirements.txt', 'rt') as file:
 
 setup(
     name='blade',
-    version=time.strftime('%Y.%m.%d.%H.%M.%S', time.localtime()),
+    version=time.strftime('%Y.%m.%d.%H.%M', time.localtime()),
     description='lib',
     long_description=long_description,
     long_description_content_type='text/markdown',  # если long_description = .md

@@ -29,6 +29,7 @@ class Blade:
     __slots__ = ('__material', '__sections', '__bondages',
                  '__height', '__volume', '__chords',
                  '__f_area',)
+    __discreteness = 10  # рекомендуемая дискретизация по высоте
 
     @classmethod
     def help(cls):
@@ -38,7 +39,7 @@ class Blade:
 
     @decorators.timeit()
     def __init__(self, material: Material, sections: dict[float | int | np.number: list, tuple, np.ndarray],
-                 bondages: tuple[dict] | list[dict] = tuple()) -> None:
+                 bondages: tuple[dict] | list[dict] = tuple(), discreteness: int = __discreteness) -> None:
         # проверка на тип данных material
         assert isinstance(material, Material)
         self.__material = material
@@ -54,13 +55,13 @@ class Blade:
         sections = dict(sorted(sections.items(), key=lambda item: item[0]))  # сортировка сечений по высоте
         self.__sections, self.__chords = dict(), dict()
         for radius, section in sections.items():  # TODO: multiprocessing
-            x, y = array(section).T
+            x, _ = array(section).T
             xmin, xmax = x.min(), x.max()
             self.__chords[radius] = xmax - xmin
             upper_lower = self.upper_lower(section)
-            self.__sections[radius] = Airfoil('MANUAL', 100,
+            self.__sections[radius] = Airfoil('MANUAL', discreteness ** 2,
                                               upper=upper_lower['upper'], lower=upper_lower['lower'], deg=1)
-            self.__sections[radius].properties  # расчет характеристик профиля
+            self.__sections[radius].properties.items()  # расчет характеристик профиля
 
         assert isinstance(bondages, (tuple, list))
         assert all(isinstance(bondage, dict) for bondage in bondages)
@@ -80,26 +81,23 @@ class Blade:
         self.__volume = integrate.quad(self.__f_area, radius0, radius1)[0]
 
     @property
-    def material(self) -> Material:
-        return self.__material
+    def material(self) -> Material: return self.__material
 
     @property
-    def sections(self) -> dict:
-        return self.__sections
+    def sections(self) -> dict: return self.__sections
 
     @property
-    def bondages(self) -> dict:
-        return self.__bondages
+    def bondages(self) -> dict: return self.__bondages
 
     @property
-    def height(self) -> float:
-        return self.__height
+    def height(self) -> float: return self.__height
 
     @property
-    def volume(self) -> float:
-        return self.__volume
+    def volume(self) -> float: return self.__volume
 
     def mass(self, temperature: float | int | np.number) -> float:
+        assert isinstance(temperature, (float, int, np.number))
+        assert 0 < temperature
         return float(self.material.density(temperature) * self.volume)
 
     @property
