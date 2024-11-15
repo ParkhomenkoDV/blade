@@ -4,9 +4,9 @@ from numpy import nan, isnan, pi, sqrt, exp, log as ln, array, linspace, arange,
 from scipy import interpolate, integrate
 import matplotlib.pyplot as plt
 
-import decorators
+from decorators import timeit
 from material import Material
-from airfoil import Airfoil
+from foil import Foil
 
 # Список использованной литературы
 REFERENCES = MappingProxyType({
@@ -24,27 +24,23 @@ REFERENCES = MappingProxyType({
 })
 
 
+# TODO: Расчет на прочность
 class Blade:
     """Лопатка/винт/лопасть"""
-    __slots__ = ('__material', '__sections', '__bondages',
-                 '__height', '__volume', '__chords',
-                 '__f_area',)
-    __discreteness = 10  # рекомендуемая дискретизация по высоте
+    __DISCRETENESS = 10  # рекомендуемая дискретизация по высоте
 
-    @classmethod
-    def help(cls):
-        version = '3.0'
-        print('Расчет на прочность')
-        return version
+    __slots__ = ('__material', '__sections', '__bondages',  # необходимые параметры
+                 '__start_point', '__height', '__volume',  # производные параметры
+                 '__f_area',)  # интерполированные параметры
 
-    @decorators.timeit()
+    @timeit(4)
     def __init__(self, material: Material, sections: dict[float | int | np.number: list, tuple, np.ndarray],
-                 bondages: tuple[dict] | list[dict] = tuple(), discreteness: int = __discreteness) -> None:
+                 bondages: tuple[dict] | list[dict] = tuple(), discreteness: int = __DISCRETENESS) -> None:
         # проверка на тип данных material
         assert isinstance(material, Material)
         self.__material = material
 
-        assert isinstance(sections, dict)
+        assert isinstance(sections, dict), 'type(sections) is not dict'
         assert all(isinstance(key, (int, float, np.number)) for key in sections.keys())
         assert len(sections) >= 2  # min количество сечений для определения высоты
         assert all(isinstance(value, (list, tuple, np.ndarray)) for value in sections.values())
@@ -53,14 +49,11 @@ class Blade:
         assert all(isinstance(x, (int, float, np.number)) and isinstance(y, (int, float, np.number))
                    for el in sections.values() for x, y in el)
         sections = dict(sorted(sections.items(), key=lambda item: item[0]))  # сортировка сечений по высоте
-        self.__sections, self.__chords = dict(), dict()
+        self.__sections, self.__start_point = dict(), dict()
         for radius, section in sections.items():  # TODO: multiprocessing
-            x, _ = array(section).T
-            xmin, xmax = x.min(), x.max()
-            self.__chords[radius] = xmax - xmin
-            upper_lower = self.upper_lower(section)
-            self.__sections[radius] = Airfoil('MANUAL', discreteness ** 2,
-                                              upper=upper_lower['upper'], lower=upper_lower['lower'], deg=1)
+            self.__start_point[radius] = section[0]  # точка старта отсчета профиля против часовой стрелки
+            self.__sections[radius] = Foil('MANUAL', discreteness ** 2, name=f'foil_{radius}'.replace('.', '_'),
+                                           points=section, deg=1)
             self.__sections[radius].properties.items()  # расчет характеристик профиля
 
         assert isinstance(bondages, (tuple, list))
@@ -72,28 +65,35 @@ class Blade:
         self.__bondages = bondages  # бондажи
 
         self.__f_area = interpolate.interp1d(list(self.__sections.keys()),
-                                             [airfoil.properties['area'] * self.__chords[radius]
-                                              for radius, airfoil in self.__sections.items()],
+                                             [foil.properties['area'] * foil.chord
+                                              for foil in self.__sections.values()],
                                              kind=1, fill_value='extrapolate')
 
+    @property
+    def material(self) -> Material:
+        return self.__material
+
+    @property
+    def sections(self) -> dict:
+        return self.__sections
+
+    @property
+    def bondages(self) -> dict:
+        return self.__bondages
+
+    @property
+    def height(self) -> float:
+        if hasattr(self, '_Blade__height'): return self.__height
         radius0, *_, radius1 = tuple(self.__sections.keys())
         self.__height = radius1 - radius0
+        return self.__height
+
+    @property
+    def volume(self) -> float:
+        if hasattr(self, '_Blade__volume'): return self.__volume
+        radius0, *_, radius1 = tuple(self.__sections.keys())
         self.__volume = integrate.quad(self.__f_area, radius0, radius1)[0]
-
-    @property
-    def material(self) -> Material: return self.__material
-
-    @property
-    def sections(self) -> dict: return self.__sections
-
-    @property
-    def bondages(self) -> dict: return self.__bondages
-
-    @property
-    def height(self) -> float: return self.__height
-
-    @property
-    def volume(self) -> float: return self.__volume
+        return self.__volume
 
     def mass(self, temperature: float | int | np.number) -> float:
         assert isinstance(temperature, (float, int, np.number))
@@ -103,8 +103,8 @@ class Blade:
     @property
     def radius_equal_strength(self) -> float:
         """Радиус равнопрочности"""
-        area0, *_, area1 = tuple(self.__area.values())  # площадь сечений втулки и периферии
         radius0, *_, radius1 = tuple(self.__sections.keys())  # радиус втулки и периферии
+        area0, *_, area1 = self.__f_area(radius0), self.__f_area(radius1)  # площадь сечений втулки и периферии
         return float(sqrt((radius0 ** 2 - radius1 ** 2 * ln(area1 / area0)) / (1 - ln(area1 / area0))))
 
     @staticmethod
@@ -126,15 +126,17 @@ class Blade:
 
     def show(self, D: int, **kwargs) -> None:
         """Визуализация"""
-        assert isinstance(D, int) and D in (2, 3)  # мерность пространства
+        assert D in (2, 3)  # мерность пространства
 
         if 2 == D:
             plt.figure(figsize=kwargs.pop('figsize', (8, 8)))
             plt.title('Blade', fontsize=14, fontweight='bold')
             plt.axis('equal')
             plt.grid(True)
-            for i, (r, airfoil) in enumerate(self.__sections.items()):
-                plt.plot(*array(airfoil.coordinates, dtype='float16').T,
+            for i, (r, foil) in enumerate(self.sections.items()):
+                x, y = array(foil.coordinates, dtype='float16').T
+                # TODO: проблема тут
+                plt.plot(x * foil.chord + self.__start_point[r][0], y * foil.chord + self.__start_point[r][1],
                          color='black', ls='solid', linewidth=(1 + 2 / (len(self.__sections) - 1) * i))
 
         elif 3 == D:
@@ -143,9 +145,9 @@ class Blade:
             plt.figure(figsize=kwargs.pop('figsize', (8, 8)))
             ax = plt.axes(projection='3d')
             ax.axis('equal')
-            for z, airfoil in self.__sections.items():
-                x, y = array(airfoil.coordinates, dtype='float16').T
-                x = x * self.__chords[z]
+            for z, foil in self.sections.items():
+                x, y = array(foil.coordinates, dtype='float16').T
+                x = x * foil.chord
                 vertices = [list(zip(x, y, [z] * len(x)))]
                 poly = Poly3DCollection(vertices, color='black', alpha=0.8)
                 ax.add_collection3d(poly)
@@ -253,7 +255,8 @@ class Blade:
                  density: tuple[dict] = tuple(),
                  pressure: tuple[dict] = tuple(),
                  velocity_axial: tuple[dict] = tuple(), velocity_tangential: tuple[dict] = tuple(),
-                 show=True):
+                 deg: int = 1,
+                 show: bool = True):
         """Расчет на прочность"""
         assert isinstance(amount, (int, np.integer)) and 1 <= amount
         assert isinstance(rotation_frequency, (float, int, np.number))
@@ -414,29 +417,33 @@ class Blade:
 
 def test():
     """Тестирование библиотеки"""
-    print(Blade.help())
 
     blades = list()
 
     if 1:
         material = Material('ЖС-40', {'density': 8_600})
 
-        airfoil0 = Airfoil('BMSTU', 40, 1, radians(20),
-                           rotation_angle=radians(60), relative_inlet_radius=0.06, relative_outlet_radius=0.03,
-                           inlet_angle=radians(20), outlet_angle=radians(15), x_ray_cross=0.35, upper_proximity=0.5)
-        airfoil1 = Airfoil('BMSTU', 40, 1, radians(30),
-                           rotation_angle=radians(50), relative_inlet_radius=0.04, relative_outlet_radius=0.025,
-                           inlet_angle=radians(15), outlet_angle=radians(10), x_ray_cross=0.35, upper_proximity=0.5)
-        airfoil2 = Airfoil('BMSTU', 40, 1, radians(40),
-                           rotation_angle=radians(40), relative_inlet_radius=0.03, relative_outlet_radius=0.02,
-                           inlet_angle=radians(10), outlet_angle=radians(5), x_ray_cross=0.35, upper_proximity=1)
+        foil0 = Foil('BMSTU', 40, 1, radians(20),
+                     rotation_angle=radians(60), relative_inlet_radius=0.06, relative_outlet_radius=0.03,
+                     inlet_angle=radians(20), outlet_angle=radians(15), x_ray_cross=0.35, upper_proximity=0.5)
+        foil1 = Foil('BMSTU', 40, 1, radians(30),
+                     rotation_angle=radians(50), relative_inlet_radius=0.04, relative_outlet_radius=0.025,
+                     inlet_angle=radians(15), outlet_angle=radians(10), x_ray_cross=0.35, upper_proximity=0.5)
+        foil2 = Foil('BMSTU', 40, 1, radians(40),
+                     rotation_angle=radians(40), relative_inlet_radius=0.03, relative_outlet_radius=0.02,
+                     inlet_angle=radians(10), outlet_angle=radians(5), x_ray_cross=0.35, upper_proximity=1)
 
-        sections = {0.5: airfoil0.transform(airfoil0.coordinates,
-                                            x0=airfoil0.properties['x0'], y0=airfoil0.properties['y0']),
-                    0.6: airfoil1.transform(airfoil1.coordinates,
-                                            x0=airfoil1.properties['x0'], y0=airfoil1.properties['y0']),
-                    0.7: airfoil2.transform(airfoil2.coordinates,
-                                            x0=airfoil2.properties['x0'], y0=airfoil2.properties['y0'])}
+        scale = 5
+        sections = {0.5: foil0.transform(foil0.coordinates,
+                                         x0=foil0.properties['x0'], y0=foil0.properties['y0'], scale=scale),
+                    0.6: foil1.transform(foil1.coordinates,
+                                         x0=foil1.properties['x0'], y0=foil1.properties['y0'], scale=scale),
+                    0.7: foil2.transform(foil2.coordinates,
+                                         x0=foil2.properties['x0'], y0=foil2.properties['y0'], scale=scale)}
+        for r, coords in sections.items():
+            plt.plot(*array(coords).T)
+            plt.axis('equal')
+        plt.show()
 
         blade = Blade(material=material, sections=sections)
         blades.append(blade)
@@ -480,11 +487,12 @@ def test():
                                       0.6: 10 ** 5,
                                       0.7: 10 ** 5, }
 
-        tensions = blade.tensions(44, 2800,
+        tensions = blade.tensions(44, 2_800,
                                   density=(density_inlet, density_outlet),
                                   pressure=(pressure_inlet, pressure_outlet),
                                   velocity_axial=(velocity_axial_inlet, velocity_axial_outlet),
                                   velocity_tangential=(velocity_tangential_inlet, velocity_tangential_outlet),
+                                  deg=1,
                                   show=True)
 
 
