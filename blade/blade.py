@@ -51,7 +51,7 @@ class Blade:
         sections = dict(sorted(sections.items(), key=lambda item: item[0]))  # сортировка сечений по высоте
         self.__sections, self.__start_point = dict(), dict()
         for radius, section in sections.items():  # TODO: multiprocessing
-            self.__start_point[radius] = section[0]  # точка старта отсчета профиля против часовой стрелки
+            self.__start_point[radius] = section[0]  # точка старта отсчета профиля против часовой стрелки = вых кромка
             self.__sections[radius] = Foil('MANUAL', discreteness ** 2, name=f'foil_{radius}'.replace('.', '_'),
                                            points=section, deg=1)
             self.__sections[radius].properties.items()  # расчет характеристик профиля
@@ -134,10 +134,11 @@ class Blade:
             plt.axis('equal')
             plt.grid(True)
             for i, (r, foil) in enumerate(self.sections.items()):
-                x, y = array(foil.coordinates, dtype='float16').T
-                # TODO: проблема тут
-                plt.plot(x * foil.chord + self.__start_point[r][0], y * foil.chord + self.__start_point[r][1],
-                         color='black', ls='solid', linewidth=(1 + 2 / (len(self.__sections) - 1) * i))
+                coordinates = Foil.transform(foil.relative_coordinates, scale=foil.chord)  # масштабирование
+                coordinates = Foil.transform(coordinates, angle=foil.installation_angle)  # поворот
+                x, y = array(coordinates, dtype='float32').T
+                plt.plot(x - self.__start_point[r][0], y - self.__start_point[r][1],
+                         color='black', ls='solid', linewidth=(1 + 2 / (len(self.sections) - 1) * i))
 
         elif 3 == D:
             from mpl_toolkits.mplot3d.art3d import Poly3DCollection
@@ -145,10 +146,11 @@ class Blade:
             plt.figure(figsize=kwargs.pop('figsize', (8, 8)))
             ax = plt.axes(projection='3d')
             ax.axis('equal')
-            for z, foil in self.sections.items():
-                x, y = array(foil.coordinates, dtype='float16').T
-                x = x * foil.chord
-                vertices = [list(zip(x, y, [z] * len(x)))]
+            for r, foil in self.sections.items():
+                coordinates = Foil.transform(foil.relative_coordinates, scale=foil.chord)  # масштабирование
+                coordinates = Foil.transform(coordinates, angle=foil.installation_angle)  # поворот
+                x, y = array(coordinates, dtype='float32').T
+                vertices = [list(zip(x - self.__start_point[r][0], y - self.__start_point[r][1], [r] * len(x)))]
                 poly = Poly3DCollection(vertices, color='black', alpha=0.8)
                 ax.add_collection3d(poly)
             ax.set_title(kwargs.pop('title', 'Blade'), fontsize=14, fontweight='bold')
@@ -164,7 +166,7 @@ class Blade:
         assert isinstance(rotation_frequency, (int, float, np.number))
         assert isinstance(temperature, (int, float, np.number)) and 0 < temperature
 
-        radius1 = tuple(self.__sections.keys())[-1]  # радиус периферии
+        radius1 = tuple(self.sections.keys())[-1]  # радиус периферии
 
         return lambda z: \
             (self.material.density(temperature) * rotation_frequency ** 2 *
@@ -181,7 +183,7 @@ class Blade:
     def area_equal_strength(self, rotation_frequency: float | int | np.number):
         assert isinstance(rotation_frequency, (int, float, np.number))
 
-        radius1 = tuple(self.__sections.keys())[-1]  # радиус периферии
+        radius1 = tuple(self.sections.keys())[-1]  # радиус периферии
         area1 = tuple(self.__area.values())[-1]  # площадь периферии
 
         return lambda z: (area1 * exp((self.radius_equal_strength ** 2 - z ** 2) /
@@ -440,10 +442,6 @@ def test():
                                          x0=foil1.properties['x0'], y0=foil1.properties['y0'], scale=scale),
                     0.7: foil2.transform(foil2.coordinates,
                                          x0=foil2.properties['x0'], y0=foil2.properties['y0'], scale=scale)}
-        for r, coords in sections.items():
-            plt.plot(*array(coords).T)
-            plt.axis('equal')
-        plt.show()
 
         blade = Blade(material=material, sections=sections)
         blades.append(blade)
