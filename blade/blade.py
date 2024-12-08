@@ -296,8 +296,11 @@ class Blade:
         mx = lambda z: integrate.quad(lambda zz: qx(zz) * (zz - z), z, radius1)[0]
         my = lambda z: -integrate.quad(lambda zz: qy(zz) * (zz - z), z, radius1)[0]
 
-        x_pressure = 0.25 * nan
-        y_pressure = nan
+        k = 0.25
+        point_pressure = {radius: (k * foil.chord, (foil.function_upper(1)() + foil.function_lower(1)()) / 2)
+                          for radius, foil in self.sections.items()}
+
+        
 
         if show: self.__show_tensions()
         return
