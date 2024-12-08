@@ -296,7 +296,7 @@ class Blade:
         mx = lambda z: integrate.quad(lambda zz: qx(zz) * (zz - z), z, radius1)[0]
         my = lambda z: -integrate.quad(lambda zz: qy(zz) * (zz - z), z, radius1)[0]
 
-        k = 0.25
+        k = 0.25 # TODO
         point_pressure = {radius: (k * foil.chord, (foil.function_upper(1)() + foil.function_lower(1)()) / 2)
                           for radius, foil in self.sections.items()}
 
