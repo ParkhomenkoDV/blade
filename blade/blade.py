@@ -27,15 +27,14 @@ REFERENCES = MappingProxyType({
 # TODO: Расчет на прочность
 class Blade:
     """Лопатка/винт/лопасть"""
-    __DISCRETENESS = 10  # рекомендуемая дискретизация по высоте
 
     __slots__ = ('__material', '__sections', '__bondages',  # необходимые параметры
                  '__start_point', '__height', '__volume',  # производные параметры
-                 '__f_area',)  # интерполированные параметры
+                 '__f_area', )  # интерполированные параметры
 
     @timeit(4)
     def __init__(self, material: Material, sections: dict[float | int | np.number: list, tuple, np.ndarray],
-                 bondages: tuple[dict] | list[dict] = tuple(), discreteness: int = __DISCRETENESS) -> None:
+                 bondages: tuple[dict] | list[dict] = tuple()) -> None:
         # проверка на тип данных material
         assert isinstance(material, Material)
         self.__material = material
@@ -52,8 +51,8 @@ class Blade:
         self.__sections, self.__start_point = dict(), dict()
         for radius, section in sections.items():  # TODO: multiprocessing
             self.__start_point[radius] = section[0]  # точка старта отсчета профиля против часовой стрелки = вых кромка
-            self.__sections[radius] = Foil('MANUAL', discreteness ** 2, name=f'foil_{radius}'.replace('.', '_'),
-                                           points=section, deg=1)
+            self.__sections[radius] = Foil.load(section, deg=1, discreteness=len(section), 
+                                                name=f'foil_{radius}'.replace('.', '_'))
             self.__sections[radius].properties.items()  # расчет характеристик профиля
 
         assert isinstance(bondages, (tuple, list))
@@ -99,23 +98,6 @@ class Blade:
         assert isinstance(temperature, (float, int, np.number))
         assert 0 < temperature
         return float(self.material.density(temperature) * self.volume)
-
-    @staticmethod
-    def upper_lower(coordinates: tuple[tuple[float, float], ...]) -> dict[str:tuple[tuple[float, float], ...]]:
-        """Разделение координат на спинку и корыто"""
-        X, Y = array(coordinates, dtype='float64').T
-        argmin, argmax = np.argmin(X), np.argmax(X)
-        upper, lower = list(), list()
-        if argmin < argmax:
-            for x, y in zip(X[argmax:-1:+1], Y[argmax:-1:+1]): upper.append((float(x), float(y)))
-            for x, y in zip(X[:argmin + 1:+1], Y[:argmin + 1:+1]): upper.append((float(x), float(y)))
-            for x, y in zip(X[argmin:argmax + 1:+1], Y[argmin:argmax + 1:+1]): lower.append((float(x), float(y)))
-        else:
-            for x, y in zip(X[argmax:argmin + 1:+1], Y[argmax:argmin + 1:+1]): upper.append((float(x), float(y)))
-            for x, y in zip(X[argmin:-1:+1], Y[argmin:-1:+1]): lower.append((float(x), float(y)))
-            for x, y in zip(X[:argmax + 1:+1], Y[:argmax + 1:+1]): lower.append((float(x), float(y)))
-        # if upper[-1][0] != 0: upper.append((0, ?)) # неизвестен y входной кромки
-        return {'upper': tuple(upper[::-1]), 'lower': tuple(lower)}
 
     def show(self, D: int, **kwargs) -> None:
         """Визуализация"""
@@ -253,6 +235,25 @@ class Blade:
         plt.tight_layout()
         plt.show()
 
+    @staticmethod
+    def __validate_parameter(parameter:dict, check_positive:bool=True):
+        """Проверка вверности введенных значений термодинамического параметра"""
+        assert isinstance(parameter, dict)
+        assert 0 < len(parameter)
+        for radius, value in parameter.items():
+            assert isinstance(radius, (float, int, np.number))
+            assert isinstance(value, (float, int, np.number))
+            assert 0 <= radius
+            if check_positive: assert 0 < value
+
+    @staticmethod
+    def __interpolate_parameter(parameter:dict):
+        """Интерполирование параметра"""
+        parameter = dict(sorted(parameter.items(), key=lambda item: item[0], reverse=False))
+        return interpolate.interp1d(tuple(parameter.keys()), tuple(parameter.values()),
+                                    kind=len(parameter) - 1 if len(parameter) <= 4 else 3,
+                                    fill_value='extrapolate')
+
     def tensions(self, amount: int | np.integer, rotation_frequency: float | int | np.number,
                  density: tuple[dict] = tuple(),
                  pressure: tuple[dict] = tuple(),
@@ -264,96 +265,34 @@ class Blade:
         assert isinstance(rotation_frequency, (float, int, np.number))
         assert isinstance(deg, (int, np.integer)) and 1 <= deg <= 3
 
-        assert isinstance(density, (tuple, list))
-        for d in density:
-            assert isinstance(d, dict)
-            assert 0 < len(d)
-            for radius, value in d.items():
-                assert isinstance(radius, (float, int, np.number))
-                assert isinstance(value, (float, int, np.number))
-                assert 0 <= radius
-                assert 0 < value
-        density_inlet = dict(sorted(density[0].items(), key=lambda item: item[0], reverse=False))
-        density_outlet = dict(sorted(density[-1].items(), key=lambda item: item[0], reverse=False))
-        f_density_inlet = interpolate.interp1d(tuple(density_inlet.keys()), tuple(density_inlet.values()),
-                                               kind=len(density_inlet) - 1 if len(density_inlet) <= 4 else 3,
-                                               fill_value='extrapolate')
-        f_density_outlet = interpolate.interp1d(tuple(density_outlet.keys()), tuple(density_outlet.values()),
-                                                kind=len(density_outlet) - 1 if len(density_outlet) <= 4 else 3,
-                                                fill_value='extrapolate')
-        f_density = lambda z: (f_density_inlet(z) + f_density_outlet(z)) / 2
+        functions = dict()
+        for name, parameters, check_positive in zip(('density', 'pressure', 'velocity_axial', 'velocity_tangential'),
+                                                    (density, pressure, velocity_axial, velocity_tangential),
+                                                    (True, True, False, False)):
+            assert isinstance(parameters, (tuple, list)) 
+            assert len(parameters) >= 2
+            
+            functions[name] = list()
+            for parameter in [parameters[0], parameters[-1]]: # для ускорения и ненадобности
+                self.__validate_parameter(parameter, check_positive=check_positive)
+                functions[name].append(self.__interpolate_parameter(parameter))
 
-        assert isinstance(pressure, (tuple, list))
-        for d in pressure:
-            assert isinstance(d, dict)
-            assert 0 < len(d)
-            for radius, value in d.items():
-                assert isinstance(radius, (float, int, np.number))
-                assert isinstance(value, (float, int, np.number))
-                assert 0 <= radius
-                assert 0 < value
-        pressure_inlet = dict(sorted(pressure[0].items(), key=lambda item: item[0], reverse=False))
-        pressure_outlet = dict(sorted(pressure[-1].items(), key=lambda item: item[0], reverse=False))
-        f_pressure_inlet = interpolate.interp1d(tuple(pressure_inlet.keys()), tuple(pressure_inlet.values()),
-                                                kind=len(pressure_inlet) - 1 if len(pressure_inlet) <= 4 else 3,
-                                                fill_value='extrapolate')
-        f_pressure_outlet = interpolate.interp1d(tuple(pressure_outlet.keys()), tuple(pressure_outlet.values()),
-                                                 kind=len(pressure_outlet) - 1 if len(pressure_outlet) <= 4 else 3,
-                                                 fill_value='extrapolate')
+        radius0, *_, radius1 = tuple(self.sections.keys())
 
-        assert isinstance(velocity_axial, (tuple, list))
-        for d in pressure:
-            assert isinstance(d, dict)
-            assert 0 < len(d)
-            for radius, value in d.items():
-                assert isinstance(radius, (float, int, np.number))
-                assert isinstance(value, (float, int, np.number))
-                assert 0 <= radius
-        velocity_axial_inlet = dict(sorted(velocity_axial[0].items(), key=lambda item: item[0], reverse=False))
-        velocity_axial_outlet = dict(sorted(velocity_axial[-1].items(), key=lambda item: item[0], reverse=False))
-        f_velocity_axial_inlet = interpolate.interp1d(tuple(velocity_axial_inlet.keys()),
-                                                      tuple(velocity_axial_inlet.values()),
-                                                      kind=len(velocity_axial_inlet) - 1
-                                                      if len(velocity_axial_inlet) <= 4 else 3,
-                                                      fill_value='extrapolate')
-        f_velocity_axial_outlet = interpolate.interp1d(tuple(velocity_axial_outlet.keys()),
-                                                       tuple(velocity_axial_outlet.values()),
-                                                       kind=len(velocity_axial_outlet) - 1
-                                                       if len(velocity_axial_outlet) <= 4 else 3,
-                                                       fill_value='extrapolate')
+        f_density_i, f_density_o = functions['density']
+        f_pressure_i, f_pressure_o = functions['pressure']
+        f_velocity_axial_i, f_velocity_axial_o = functions['velocity_axial']
+        f_velocity_tangential_i, f_velocity_tangential_o = functions['velocity_tangential']
 
-        assert isinstance(velocity_tangential, (tuple, list))
-        for d in pressure:
-            assert isinstance(d, dict)
-            assert 0 < len(d)
-            for radius, value in d.items():
-                assert isinstance(radius, (float, int, np.number))
-                assert isinstance(value, (float, int, np.number))
-                assert 0 <= radius
-        velocity_tangential_inlet = dict(sorted(velocity_tangential[0].items(),
-                                                key=lambda item: item[0], reverse=False))
-        velocity_tangential_outlet = dict(sorted(velocity_tangential[-1].items(),
-                                                 key=lambda item: item[0], reverse=False))
-        f_velocity_tangential_inlet = interpolate.interp1d(tuple(velocity_tangential_inlet.keys()),
-                                                           tuple(velocity_tangential_inlet.values()),
-                                                           kind=len(velocity_tangential_inlet) - 1
-                                                           if len(velocity_tangential_inlet) <= 4 else 3,
-                                                           fill_value='extrapolate')
-        f_velocity_tangential_outlet = interpolate.interp1d(tuple(velocity_tangential_outlet.keys()),
-                                                            tuple(velocity_tangential_outlet.values()),
-                                                            kind=len(velocity_tangential_outlet) - 1
-                                                            if len(velocity_tangential_outlet) <= 4 else 3,
-                                                            fill_value='extrapolate')
-
-        radius1 = tuple(self.sections.keys())[-1]
+        f_density = lambda z: (f_density_i(z) + f_density_o(z)) / 2
 
         qx = lambda z: (2 * pi * z / amount *
-                        ((f_pressure_inlet(z) - f_pressure_outlet(z)) -
+                        ((f_pressure_i(z) - f_pressure_o(z)) -
                          f_density(z) *
-                         f_velocity_axial_inlet(z) * (f_velocity_axial_outlet(z) - f_velocity_axial_inlet(z))))
+                         f_velocity_axial_i(z) * (f_velocity_axial_o(z) - f_velocity_axial_i(z))))
         qy = lambda z: (2 * pi * z / amount *
                         f_density(z) *
-                        f_velocity_axial_inlet(z) * (f_velocity_tangential_outlet(z) - f_velocity_tangential_inlet(z)))
+                        f_velocity_axial_i(z) * (f_velocity_tangential_o(z) - f_velocity_tangential_i(z)))
         mx = lambda z: integrate.quad(lambda zz: qx(zz) * (zz - z), z, radius1)[0]
         my = lambda z: -integrate.quad(lambda zz: qy(zz) * (zz - z), z, radius1)[0]
 
@@ -483,9 +422,9 @@ def test():
         sections = {0.50: foil0.transform(foil0.coordinates,
                                           x0=foil0.properties['x0'], y0=foil0.properties['y0'], scale=scale),
                     0.55: foil1.transform(foil1.coordinates,
-                                          x0=foil1.properties['x0'], y0=foil1.properties['y0'], scale=scale),
+                                          x0=foil1.properties['x0'], y0=foil1.properties['y0'], scale=scale*0.9),
                     0.60: foil2.transform(foil2.coordinates,
-                                          x0=foil2.properties['x0'], y0=foil2.properties['y0'], scale=scale)}
+                                          x0=foil2.properties['x0'], y0=foil2.properties['y0'], scale=scale*0.8)}
 
         blade = Blade(material=material, sections=sections)
         blades.append(blade)
