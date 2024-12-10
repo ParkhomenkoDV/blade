@@ -24,13 +24,12 @@ REFERENCES = MappingProxyType({
 })
 
 
-# TODO: Расчет на прочность
 class Blade:
     """Лопатка/винт/лопасть"""
 
     __slots__ = ('__material', '__sections', '__bondages',  # необходимые параметры
                  '__start_point', '__height', '__volume',  # производные параметры
-                 '__f_area', )  # интерполированные параметры
+                 '__f_area',)  # интерполированные параметры
 
     @timeit(4)
     def __init__(self, material: Material, sections: dict[float | int | np.number: list, tuple, np.ndarray],
@@ -51,7 +50,7 @@ class Blade:
         self.__sections, self.__start_point = dict(), dict()
         for radius, section in sections.items():  # TODO: multiprocessing
             self.__start_point[radius] = section[0]  # точка старта отсчета профиля против часовой стрелки = вых кромка
-            self.__sections[radius] = Foil.load(section, deg=1, discreteness=len(section), 
+            self.__sections[radius] = Foil.load(section, deg=1, discreteness=len(section),
                                                 name=f'foil_{radius}'.replace('.', '_'))
             self.__sections[radius].properties.items()  # расчет характеристик профиля
 
@@ -236,8 +235,8 @@ class Blade:
         plt.show()
 
     @staticmethod
-    def __validate_parameter(parameter:dict, check_positive:bool=True):
-        """Проверка вверности введенных значений термодинамического параметра"""
+    def __validate_parameter(parameter: dict, check_positive: bool = True) -> None:
+        """Проверка верности введенных значений термодинамического параметра"""
         assert isinstance(parameter, dict)
         assert 0 < len(parameter)
         for radius, value in parameter.items():
@@ -247,13 +246,13 @@ class Blade:
             if check_positive: assert 0 < value
 
     @staticmethod
-    def __interpolate_parameter(parameter:dict):
+    def __interpolate_parameter(parameter: dict, deg: int = 1) -> interpolate.interp1d:
         """Интерполирование параметра"""
         parameter = dict(sorted(parameter.items(), key=lambda item: item[0], reverse=False))
         return interpolate.interp1d(tuple(parameter.keys()), tuple(parameter.values()),
-                                    kind=len(parameter) - 1 if len(parameter) <= 4 else 3,
-                                    fill_value='extrapolate')
+                                    kind=min(len(parameter) - 1, deg), fill_value='extrapolate')
 
+    # TODO: Расчет на прочность
     def tensions(self, amount: int | np.integer, rotation_frequency: float | int | np.number,
                  density: tuple[dict] = tuple(),
                  pressure: tuple[dict] = tuple(),
@@ -266,16 +265,18 @@ class Blade:
         assert isinstance(deg, (int, np.integer)) and 1 <= deg <= 3
 
         functions = dict()
-        for name, parameters, check_positive in zip(('density', 'pressure', 'velocity_axial', 'velocity_tangential'),
-                                                    (density, pressure, velocity_axial, velocity_tangential),
-                                                    (True, True, False, False)):
-            assert isinstance(parameters, (tuple, list)) 
-            assert len(parameters) >= 2
-            
+
+        for name, parameters, check_positive in (('density', density, True),
+                                                 ('pressure', pressure, True),
+                                                 ('velocity_axial', velocity_axial, False),
+                                                 ('velocity_tangential', velocity_tangential, False)):
+            assert isinstance(parameters, (tuple, list)), f'{name} is not list or tuple'
+            assert len(parameters) >= 2, f'len({name}) < 2'
+
             functions[name] = list()
-            for parameter in [parameters[0], parameters[-1]]: # для ускорения и ненадобности
+            for parameter in [parameters[0], parameters[-1]]:  # для ускорения и ненадобности
                 self.__validate_parameter(parameter, check_positive=check_positive)
-                functions[name].append(self.__interpolate_parameter(parameter))
+                functions[name].append(self.__interpolate_parameter(parameter, deg=deg))
 
         radius0, *_, radius1 = tuple(self.sections.keys())
 
@@ -284,7 +285,7 @@ class Blade:
         f_velocity_axial_i, f_velocity_axial_o = functions['velocity_axial']
         f_velocity_tangential_i, f_velocity_tangential_o = functions['velocity_tangential']
 
-        f_density = lambda z: (f_density_i(z) + f_density_o(z)) / 2
+        f_density = lambda z: (f_density_i(z) + f_density_o(z)) / 2  # средняя арифметическая плотность
 
         qx = lambda z: (2 * pi * z / amount *
                         ((f_pressure_i(z) - f_pressure_o(z)) -
@@ -293,14 +294,15 @@ class Blade:
         qy = lambda z: (2 * pi * z / amount *
                         f_density(z) *
                         f_velocity_axial_i(z) * (f_velocity_tangential_o(z) - f_velocity_tangential_i(z)))
-        mx = lambda z: integrate.quad(lambda zz: qx(zz) * (zz - z), z, radius1)[0]
-        my = lambda z: -integrate.quad(lambda zz: qy(zz) * (zz - z), z, radius1)[0]
 
-        k = 0.25 # TODO
-        point_pressure = {radius: (k * foil.chord, (foil.function_upper(1)() + foil.function_lower(1)()) / 2)
-                          for radius, foil in self.sections.items()}
+        f_moment = lambda q, z: integrate.quad(lambda zz: q(zz) * (zz - z), z, radius1)[0]
 
-        
+        moment_x = lambda z: integrate.quad(lambda zz: qx(zz) * (zz - z), z, radius1)[0]
+        moment_y = lambda z: -integrate.quad(lambda zz: qy(zz) * (zz - z), z, radius1)[0]
+
+        k = 0.25  # TODO
+        '''point_pressure = {radius: (k * foil.chord, (foil.function_upper(1)() + foil.function_lower(1)()) / 2)
+                          for radius, foil in self.sections.items()}'''
 
         if show: self.__show_tensions()
         return
@@ -425,9 +427,9 @@ def test():
         sections = {0.50: foil0.transform(foil0.coordinates,
                                           x0=foil0.properties['x0'], y0=foil0.properties['y0'], scale=scale),
                     0.55: foil1.transform(foil1.coordinates,
-                                          x0=foil1.properties['x0'], y0=foil1.properties['y0'], scale=scale*0.9),
+                                          x0=foil1.properties['x0'], y0=foil1.properties['y0'], scale=scale * 0.9),
                     0.60: foil2.transform(foil2.coordinates,
-                                          x0=foil2.properties['x0'], y0=foil2.properties['y0'], scale=scale*0.8)}
+                                          x0=foil2.properties['x0'], y0=foil2.properties['y0'], scale=scale * 0.8)}
 
         blade = Blade(material=material, sections=sections)
         blades.append(blade)
