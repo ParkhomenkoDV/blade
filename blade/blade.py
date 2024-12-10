@@ -1,6 +1,6 @@
 from types import MappingProxyType  # неизменяемый словарь
 import numpy as np
-from numpy import nan, isnan, pi, sqrt, exp, log as ln, array, linspace, arange, radians
+from numpy import nan, isnan, pi, sqrt, exp, log as ln, array, linspace, arange, radians, cos, sin, atan
 from scipy import interpolate, integrate
 import matplotlib.pyplot as plt
 
@@ -28,8 +28,8 @@ class Blade:
     """Лопатка/винт/лопасть"""
 
     __slots__ = ('__material', '__sections', '__bondages',  # необходимые параметры
-                 '__start_point', '__height', '__volume',  # производные параметры
-                 '__f_area',)  # интерполированные параметры
+                 '__start_point', '__center_pressure', '__height', '__volume',  # производные параметры
+                 '__f_area', '__f_center_pressure', '__f_installation_angle')  # интерполированные параметры
 
     @timeit(4)
     def __init__(self, material: Material, sections: dict[float | int | np.number: list, tuple, np.ndarray],
@@ -47,12 +47,16 @@ class Blade:
         assert all(isinstance(x, (int, float, np.number)) and isinstance(y, (int, float, np.number))
                    for el in sections.values() for x, y in el)
         sections = dict(sorted(sections.items(), key=lambda item: item[0]))  # сортировка сечений по высоте
-        self.__sections, self.__start_point = dict(), dict()
+        self.__sections, self.__start_point, self.__center_pressure = dict(), dict(), dict()
         for radius, section in sections.items():  # TODO: multiprocessing
             self.__start_point[radius] = section[0]  # точка старта отсчета профиля против часовой стрелки = вых кромка
-            self.__sections[radius] = Foil.load(section, deg=1, discreteness=len(section),
-                                                name=f'foil_{radius}'.replace('.', '_'))
-            self.__sections[radius].properties.items()  # расчет характеристик профиля
+            foil = Foil.load(section, deg=1, discreteness=len(section), name=f'foil_{radius}'.replace('.', '_'))
+            center_pressure = foil.center_pressure(0.3)  # расчет профиля
+            center_pressure = Foil.transform([center_pressure], scale=foil.chord)
+            center_pressure = Foil.transform(center_pressure, angle=foil.installation_angle)
+            center_pressure = Foil.transform(center_pressure, x0=-section[0][0], y0=-section[0][1])
+            self.__center_pressure[radius] = center_pressure[0]
+            self.__sections[radius] = foil
 
         assert isinstance(bondages, (tuple, list))
         assert all(isinstance(bondage, dict) for bondage in bondages)
@@ -66,6 +70,18 @@ class Blade:
                                              [foil.properties['area'] * foil.chord ** 2
                                               for foil in self.__sections.values()],
                                              kind=1, fill_value='extrapolate')
+        self.__f_center_pressure = (interpolate.interp1d(list(self.__sections.keys()),
+                                                         [self.__center_pressure[radius][0]
+                                                          for radius in self.__sections],
+                                                         kind=1, fill_value='extrapolate'),
+                                    interpolate.interp1d(list(self.__sections.keys()),
+                                                         [self.__center_pressure[radius][1]
+                                                          for radius in self.__sections],
+                                                         kind=1, fill_value='extrapolate'))
+        self.__f_installation_angle = interpolate.interp1d(list(self.__sections.keys()),
+                                                           [foil.installation_angle
+                                                            for foil in self.__sections.values()],
+                                                           kind=1, fill_value='extrapolate')
 
     @property
     def material(self) -> Material:
@@ -102,9 +118,10 @@ class Blade:
         """Визуализация"""
         assert D in (2, 3)  # мерность пространства
 
+        plt.figure(figsize=kwargs.pop('figsize', (8, 8)))
+
         if 2 == D:
-            plt.figure(figsize=kwargs.pop('figsize', (8, 8)))
-            plt.title('Blade', fontsize=14, fontweight='bold')
+            plt.title(kwargs.pop('title', 'Blade'), fontsize=14, fontweight='bold')
             plt.axis('equal')
             plt.grid(True)
             for i, (r, foil) in enumerate(self.sections.items()):
@@ -112,25 +129,24 @@ class Blade:
                 coordinates = Foil.transform(coordinates, angle=foil.installation_angle)  # поворот
                 x, y = array(coordinates, dtype='float32').T
                 plt.plot(x - self.__start_point[r][0], y - self.__start_point[r][1],
-                         color='black', ls='solid', linewidth=(1 + 2 / (len(self.sections) - 1) * i))
+                         color=kwargs.get('color', 'black'), ls='solid',
+                         linewidth=(1 + 2 / (len(self.sections) - 1) * i))
+            plt.xlabel('x', fontsize=12), plt.ylabel('y', fontsize=12)
 
         elif 3 == D:
             from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-            plt.figure(figsize=kwargs.pop('figsize', (8, 8)))
             ax = plt.axes(projection='3d')
+            ax.set_title(kwargs.pop('title', 'Blade'), fontsize=14, fontweight='bold')
             ax.axis('equal')
             for r, foil in self.sections.items():
                 coordinates = Foil.transform(foil.relative_coordinates, scale=foil.chord)  # масштабирование
                 coordinates = Foil.transform(coordinates, angle=foil.installation_angle)  # поворот
                 x, y = array(coordinates, dtype='float32').T
                 vertices = [list(zip(x - self.__start_point[r][0], y - self.__start_point[r][1], [r] * len(x)))]
-                poly = Poly3DCollection(vertices, color='black', alpha=0.8)
+                poly = Poly3DCollection(vertices, color=kwargs.get('color', 'black'), alpha=0.8)
                 ax.add_collection3d(poly)
-            ax.set_title(kwargs.pop('title', 'Blade'), fontsize=14, fontweight='bold')
-            ax.set_xlabel('x', fontsize=12)
-            ax.set_ylabel('y', fontsize=12)
-            ax.set_zlabel('z', fontsize=12)
+            ax.set_xlabel('x', fontsize=12), ax.set_ylabel('y', fontsize=12), ax.set_zlabel('z', fontsize=12)
 
         plt.tight_layout()
         plt.show()
@@ -149,10 +165,9 @@ class Blade:
 
         radius1 = tuple(self.sections.keys())[-1]  # радиус периферии
 
-        return lambda z: \
-            float(self.material.density(temperature) * rotation_frequency ** 2 *
-                  (integrate.quad(lambda r: self.__f_area(r) * r, z, radius1)[0] +
-                   sum([b['radius'] * b['volume'] for b in self.bondages])))
+        return lambda z: float(self.material.density(temperature) * rotation_frequency ** 2 *
+                               (integrate.quad(lambda r: self.__f_area(r) * r, z, radius1)[0] +
+                                sum([b['radius'] * b['volume'] for b in self.bondages])))
 
     def radial_tension(self, rotation_frequency: float | int | np.number,
                        temperature: float | int | np.number):
@@ -300,9 +315,28 @@ class Blade:
         moment_x = lambda z: integrate.quad(lambda zz: qx(zz) * (zz - z), z, radius1)[0]
         moment_y = lambda z: -integrate.quad(lambda zz: qy(zz) * (zz - z), z, radius1)[0]
 
-        k = 0.25  # TODO
-        '''point_pressure = {radius: (k * foil.chord, (foil.function_upper(1)() + foil.function_lower(1)()) / 2)
-                          for radius, foil in self.sections.items()}'''
+        moment_torque = lambda z: (
+            integrate.quad(lambda zz:
+                           qy(zz) * self.__f_center_pressure[0](zz) - qx(zz) * self.__f_center_pressure[1](zz),
+                           z, radius1))[0]
+
+        moment_xx = lambda z: 0 + moment_x(z)
+        moment_yy = lambda z: 0 + moment_x(z)
+
+        moment_u = lambda z: (moment_xx(z) * cos(self.__f_installation_angle(z)) +
+                              moment_yy(z) * sin(self.__f_installation_angle(z)))
+        moment_v = lambda z: (-moment_xx(z) * sin(self.__f_installation_angle(z)) +
+                              moment_yy(z) * cos(self.__f_installation_angle(z)))
+
+        for radius, foil in self.__sections.items():
+            tau = moment_torque(radius) / (foil.properties['Wp'] * foil.chord ** 3)
+            print(f'{tau = }')
+            mu = moment_u(radius)
+            mv = moment_v(radius)
+            betta = atan((mv / mu) * (foil.properties['Jx'] / foil.properties['Jy']))
+            print(f'{betta = }')
+            x_vynos = 0
+            y_vynos = 0
 
         if show: self.__show_tensions()
         return
